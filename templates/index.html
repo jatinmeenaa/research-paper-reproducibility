@@ -10,6 +10,7 @@
 
     <!-- Connect external CSS file -->
     <link rel="stylesheet" href="..\static\css\style.css">
+   <script src="../static/js/script.js" defer></script>
 </head>
 
 <body>
@@ -34,17 +35,18 @@
             Discover research papers, explore their resources,
             and assess reproducibility readiness.
         </p>
+     <!--search bar-->
+       <form id="searchForm" class="search-box">
+    <input
+        type="text"
+        id="searchInput"
+        placeholder="Search research papers..."
+    >
 
-        <!-- Search Bar -->
-        <form class="search-box" action="#" method="GET">
+    <button type="submit">Search</button>
+</form>
 
-            <input
-                type="text"
-                name="query"
-                placeholder="Search research papers..."
-                aria-label="Search research papers"
-                required
-            >
+<p id="searchError"></p>
 
             <button type="submit">Search</button>
 

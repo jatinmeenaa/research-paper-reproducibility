@@ -252,5 +252,20 @@ footer p {
         padding: 50px 21px;
     }
 
+    #searchError {
+    color: #dc2626;
+    font-size: 14px;
+    text-align: center;
+    margin-top: 12px;
+}
+
+.search-box input:focus {
+    background-color: #f8fafc;
+}
+
+.search-box button:active {
+    transform: scale(0.98);
+}
+
   
 }

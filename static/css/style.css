@@ -383,7 +383,8 @@ small {
     background: #f8faff;
 }
 
-.search-form>/* Buttons and action links */
+.search-form>
+/* Buttons and action links */
 .button {
     white-space: nowrap;
 }
@@ -474,3 +475,59 @@ small {
     flex-wrap: wrap;
     margin-top: 18px;
 }
+
+
+/* Section headings and feature cards */
+.section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.section-heading h2,
+.section-heading p {
+    margin-bottom: 0;
+}
+
+.section-heading .eyebrow {
+    margin-bottom: 7px;
+}
+
+.section-heading>a {
+    flex-shrink: 0;
+}
+
+.feature-grid,
+.paper-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+}
+
+.feature-card {
+    padding: 28px 24px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+}
+
+.feature-card p {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.step-number {
+    display: block;
+    font-size: 10px;
+    letter-spacing: .12em;
+    color: var(--blue);
+    font-weight: 750;
+    margin-bottom: 24px;
+}
+
+.feature-card h3 {
+    font-size: 19px;
+}
+

@@ -620,3 +620,103 @@ small {
     color: #42618f;
     line-height: 1.5;
 }
+
+/* Paper cards and resource status badges */
+.paper-card {
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    transition: box-shadow .2s;
+}
+
+.paper-card:hover {
+    box-shadow: 0 8px 24px #14213d0c;
+}
+
+.card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.paper-card h3 {
+    line-height: 1.4;
+    font-size: 17px;
+}
+
+.paper-card h3 a {
+    color: var(--ink);
+}
+
+.authors {
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.abstract-preview {
+    font-size: 13px;
+    color: #66758b;
+    flex: 1;
+}
+
+.card-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid #edf0f5;
+    margin-top: 4px;
+}
+
+.card-bottom .text-link {
+    white-space: nowrap;
+}
+
+.score-pill {
+    background: #eaf4ed;
+    color: #21704b;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.status {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 5px;
+    font-size: 11px;
+    line-height: 1.5;
+    font-weight: 600;
+    background: #f0f3f7;
+    color: #627083;
+}
+
+.status.accessible {
+    color: #177048;
+    background: #e8f6ee;
+}
+
+.status.missing {
+    color: #b83434;
+    background: #ffeded;
+}
+
+.status.restricted,
+.status.unresolved {
+    color: #8a5912;
+    background: #fff4df;
+}
+
+.status.blocked {
+    color: #774693;
+    background: #f3eafa;
+}

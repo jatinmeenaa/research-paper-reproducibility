@@ -720,3 +720,80 @@ small {
     color: #774693;
     background: #f3eafa;
 }
+
+/*library filters and result card */
+.library-layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+}
+
+.filter-panel {
+    position: sticky;
+    top: 24px;
+}
+
+.filter-panel .section-heading {
+    margin-bottom: 18px;
+}
+
+.filter-panel h2 {
+    font-size: 18px;
+}
+
+.filter-panel .section-heading a {
+    font-size: 12px;
+}
+
+.filter-panel label:not(:first-child) {
+    margin-top: 16px;
+}
+
+.filter-panel .button {
+    margin-top: 22px;
+    width: 100%;
+}
+
+.library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.result-count {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 18px;
+}
+
+.empty-state {
+    text-align: center;
+    border: 1px dashed #d3ddeb;
+    border-radius: var(--radius);
+    padding: 64px 24px;
+    background: #ffffff80;
+}
+
+.empty-state p {
+    color: var(--muted);
+    max-width: 550px;
+    margin-inline: auto;
+}
+
+.empty-icon {
+    font-size: 48px;
+    color: var(--blue);
+}
+
+.empty-state .button {
+    margin-top: 12px;
+}
+
+.flash-stack:empty {
+    display: none;
+}
+
+.flash-stack {
+    padding-top: 16px;
+}
+
+

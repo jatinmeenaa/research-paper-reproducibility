@@ -5,10 +5,7 @@ from pathlib import Path
 # Project root directory
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Database file location
 DATABASE_PATH = PROJECT_ROOT / "instance" / "reproducibility_explorer.db"
-
-# SQL schema file
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 
@@ -21,7 +18,6 @@ def get_connection(db_path=None):
 
     db_path = Path(db_path) # path object for the path.... for using function
 
-    # Ensure the parent directory exists
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     connection = sqlite3.connect(db_path)
@@ -45,6 +41,41 @@ def init_db(db_path=None):
         schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
         connection.executescript(schema_sql)
         connection.commit()
+
+    finally:
+        connection.close()
+
+# save a research paper
+# if already exists tthen id returned
+def save_paper(paper):
+
+
+    connection = get_connection()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            INSERT INTO papers (source, external_id, title, authors, year, abstract, paper_url, pdf_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source, external_id) DO NOTHING """,
+            (paper["source"],
+            paper["external_id"],
+            paper["title"],
+            paper.get("authors"),
+            paper.get("year"),
+            paper.get("abstract"),
+            paper.get("paper_url"),
+            paper.get("pdf_url")))
+        
+        # retrieve id 
+        cursor.execute("""
+            SELECT id FROM papers
+            WHERE source = ? AND external_id = ? """, ( paper["source"], paper["external_id"]))
+
+        paper_id = cursor.fetchone()["id"]
+        connection.commit()
+        return paper_id
 
     finally:
         connection.close()

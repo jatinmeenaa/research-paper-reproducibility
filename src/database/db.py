@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -76,6 +78,28 @@ def save_paper(paper):
         paper_id = cursor.fetchone()["id"]
         connection.commit()
         return paper_id
+
+    finally:
+        connection.close()
+
+# retrieve a research paper by its id
+def get_paper_by_id(paper_id):
+    connection = get_connection()
+
+    try:
+        cursor = connection.execute("SELECT * FROM papers WHERE id = ?",(paper_id,))
+        return cursor.fetchone()
+
+    finally:
+        connection.close()
+
+# retrieve a research paper by its source and external id
+def get_paper_by_external_id(source, external_id):
+
+    connection = get_connection()
+    try:
+        cursor = connection.execute("""SELECT * FROM papers WHERE source = ? AND external_id = ? """,(source, external_id))
+        return cursor.fetchone()
 
     finally:
         connection.close()

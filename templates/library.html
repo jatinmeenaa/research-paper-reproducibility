@@ -3,6 +3,10 @@
 {% block title %}
     Saved library
 {% endblock %}
+{% block styles %}
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/library.css') }}">
+{% endblock %}
 {% block content %}
     <section class="container page-head">
         <span class="eyebrow">YOUR RESEARCH WORKSPACE</span>

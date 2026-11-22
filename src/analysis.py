@@ -33,26 +33,6 @@ LIMITATIONS = [
     f"At most {MAX_LINKS} links are checked per report.",
 ]
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def latest_job(paper_id):
     with connection() as db:
         row = db.execute(
@@ -226,6 +206,145 @@ def _extract(paper):
 
 
 
+
+def _run_analysis(app, job_id, paper_id, applicable):
+    with app.app_context():
+        try:
+            _set_stage(job_id, "Reading paper")
+
+            paper = get_paper(paper_id)
+            if paper is None:
+                raise ValueError("Paper not found.")
+
+            extracted, scope = _extract(paper)
+            warnings = list(extracted["warnings"])
+            candidates = {}
+
+            for resource in extracted["resources"]:
+                candidates.setdefault(resource["url"], resource)
+
+            abstract = paper["abstract"] or ""
+
+            for resource in links_from_text(abstract):
+                candidates.setdefault(resource["url"], resource)
+
+            resources = sorted(
+                candidates.values(),
+                key=lambda item: item["category"] == "other",
+            )
+            candidate_count = len(resources)
+
+            if candidate_count > MAX_LINKS:
+                warnings.append(
+                    f"Detected {candidate_count} links; only the "
+                    f"first {MAX_LINKS} were checked, prioritizing "
+                    "recognized resource categories."
+                )
+
+            resources = resources[:MAX_LINKS]
+
+            _set_stage(
+                job_id,
+                f"Checking {len(resources)} resource links",
+            )
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                checked = list(
+                    pool.map(check_resource, resources)
+                )
+
+            _set_stage(job_id, "Calculating and saving report")
+
+            report = {
+                **calculate_score(checked, applicable),
+                "scope": scope,
+                "pages": extracted["pages"],
+                "analyzed_at": now(),
+                "warnings": warnings,
+                "resource_count": len(checked),
+                "candidate_count": candidate_count,
+                "text_characters": (
+                    len(extracted["text"]) + len(abstract)
+                ),
+                "limitations": list(LIMITATIONS),
+            }
+
+            status = (
+                "partial"
+                if scope == "Abstract only" or warnings
+                else "complete"
+            )
+
+            save_analysis(paper_id, checked, report, status)
+
+            with connection() as db:
+                db.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'completed',
+                        stage = 'Report ready',
+                        finished_at = ?
+                    WHERE id = ?
+                    """,
+                    (now(), job_id),
+                )
+
+        except Exception:
+            app.logger.exception(
+                "Analysis failed for paper %s", paper_id
+            )
+            _fail_job(job_id, paper_id)
+
+
+def rescore(paper_id):
+    with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+
+        paper = db.execute(
+            "SELECT * FROM papers WHERE id = ?",
+            (paper_id,),
+        ).fetchone()
+
+        if paper is None:
+            raise ValueError("Paper not found.")
+
+        if paper["analysis_status"] == "analyzing":
+            raise ValueError("Wait for analysis to finish.")
+
+        if not paper["report"]:
+            raise ValueError("Analyze this paper first.")
+
+        resources = [
+            decode_resource(row)
+            for row in db.execute(
+                "SELECT * FROM resources WHERE paper_id = ?",
+                (paper_id,),
+            )
+        ]
+
+        report = json.loads(paper["report"])
+        report.update(
+            calculate_score(
+                resources,
+                report.get("applicable"),
+            )
+        )
+        report["rescored_at"] = now()
+
+        db.execute(
+            """
+            UPDATE papers
+            SET report = ?, score = ?
+            WHERE id = ?
+            """,
+            (
+                json.dumps(report),
+                report["score"],
+                paper_id,
+            ),
+        )
+
+    return report
 
 
 

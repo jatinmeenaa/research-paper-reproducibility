@@ -27,25 +27,6 @@ def identity(paper):
     return "title:" + hashlib.sha256(title.encode()).hexdigest()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def public_url(value):
     if not value:
         return None

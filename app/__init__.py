@@ -22,6 +22,8 @@ def create_app(*, register_pages=False):
 
     with app.app_context():
         init_db()
+        from src.analysis import recover_interrupted_jobs
+        recover_interrupted_jobs()
 
     @app.get("/health")
     def health():

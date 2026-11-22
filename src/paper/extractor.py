@@ -4,6 +4,17 @@ import pymupdf as fitz
 from src.parser import classify, links_from_text, normalize_url
 
 
+
+
+
+
+
+
+
+
+
+
+
 def extract_paper(pdf_path, max_pages=300):
   
     pdf_path = Path(pdf_path)

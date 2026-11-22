@@ -27,6 +27,25 @@ def identity(paper):
     return "title:" + hashlib.sha256(title.encode()).hexdigest()
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def public_url(value):
     if not value:
         return None
@@ -39,8 +58,7 @@ def public_url(value):
 
 def search_semantic(query, limit=10):
     return search_semantic_scholar(
-        query, limit, api_key=current_app.config.get("SEMANTIC_SCHOLAR_API_KEY")
-    )
+        query, limit, api_key=current_app.config.get("SEMANTIC_SCHOLAR_API_KEY"))
 
 
 def discover(query, source="arXiv"):

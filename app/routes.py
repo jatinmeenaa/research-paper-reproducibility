@@ -11,15 +11,8 @@ from urllib.parse import urlsplit
 import app
 import pymupdf as fitz
 from flask import (
-    Response,
-    abort,
-    current_app,
-    flash,
-    jsonify,
-    redirect,
-    render_template,
-    request,
-    url_for,
+    Response,abort,current_app,flash,
+    jsonify,redirect,render_template,request,url_for,
 )
 
 from src.analysis import latest_job, rescore, start_analysis
@@ -60,7 +53,6 @@ def filters():
             except ValueError:
                 abort(400, description="Year or minimum score is invalid.")
     return result
-
 
 def register_routes(app):
 
@@ -378,8 +370,7 @@ def register_routes(app):
                         paper["source"],
                         paper["analysis_status"],
                         paper["score"],
-                        (paper["report"] or {}).get("analyzed_at"),
-                        paper["paper_url"],
+                        (paper["report"] or {}).get("analyzed_at"),paper["paper_url"],
                     )
                 ]
             )

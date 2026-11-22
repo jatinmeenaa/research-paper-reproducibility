@@ -13,6 +13,9 @@
         </title>
         <link rel="stylesheet"
               href="{{ url_for('static', filename='css/style.css') }}">
+        <link rel="stylesheet"
+              href="{{ url_for('static', filename='css/_cards.css') }}">
+        {% block styles %}{% endblock %}
         <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
         {% block head %}{% endblock %}
     </head>

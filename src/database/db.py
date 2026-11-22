@@ -189,6 +189,17 @@ def update_resources(paper_id, resources):
             for resource in resources
         ]
 
+
+
+
+
+
+
+
+
+
+
+
         current_urls = [resource[1] for resource in resource_data]
         if current_urls:
             placeholders = ",".join("?" for _ in current_urls)
@@ -211,6 +222,11 @@ def update_resources(paper_id, resources):
                 http_status, error_message, checked_at )
             values (?, ?, ?, ?, ?, ?, ?)
 
+            
+
+
+
+            
             on conflict(paper_id, url)
             do update set
                 resource_type = excluded.resource_type,
@@ -229,3 +245,20 @@ def update_resources(paper_id, resources):
 
     finally:
         connection.close()
+
+
+
+
+
+
+
+
+
+
+        
+
+
+
+
+
+        

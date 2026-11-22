@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS papers (
 );
 
 
+
+
+
+
+
+
+
+
 -- Table.: resources : stores unique resources belonging to papers
 
 CREATE TABLE IF NOT EXISTS resources (

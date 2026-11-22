@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS papers (
     external_id TEXT NOT NULL,
 
     title TEXT NOT NULL,
-    authors TEXT,
+    authors TEXT NOT NULL DEFAULT '[]',
     year INTEGER,
-    abstract TEXT,
+    abstract TEXT NOT NULL DEFAULT '',
 
     paper_url TEXT,
     pdf_url TEXT,
@@ -18,26 +18,17 @@ CREATE TABLE IF NOT EXISTS papers (
     last_analyzed_at TEXT,
 
     analysis_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (
-            analysis_status IN (
-                'pending',
-                'completed',
-                'partial',
-                'failed'
-            )
-        ),
+        CHECK (analysis_status IN ('pending', 'completed', 'partial', 'failed', 'analyzing')),
+
+    identity TEXT UNIQUE NOT NULL,
+    area TEXT NOT NULL DEFAULT 'Uncategorized',
+    local_path TEXT,
+    created_at TEXT NOT NULL,
+    report TEXT,
+    score INTEGER,
 
     UNIQUE (source, external_id)
 );
-
-
-
-
-
-
-
-
-
 
 -- Table.: resources : stores unique resources belonging to papers
 
@@ -72,9 +63,15 @@ CREATE TABLE IF NOT EXISTS resources (
     error_message TEXT,
     checked_at TEXT,
 
-    FOREIGN KEY (paper_id)
-        REFERENCES papers(id)
-        ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'unchecked'
+        CHECK (status IN ('unchecked', 'accessible', 'missing', 'restricted', 'unresolved', 'blocked')),
+    evidence TEXT NOT NULL DEFAULT '',
+    page INTEGER,
+    final_url TEXT,
+    note TEXT NOT NULL DEFAULT '',
+
+
+    FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE,
 
     UNIQUE (paper_id, url)
 );

@@ -1,264 +1,352 @@
+import json
 import sqlite3
-from pathlib import Path
-
+from contextlib import contextmanager
 from datetime import datetime, timezone
-
+from pathlib import Path
+from flask import current_app, has_app_context
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-DATABASE_PATH = PROJECT_ROOT / "instance" / "reproducibility_explorer.db"
-SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
+DATABASE_PATH = PROJECT_ROOT / "data" / "paperlens.db"
+SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+APP_SCHEMA_PATH = Path(__file__).with_name("app_schema.sql")
+SCHEMA = (
+    SCHEMA_PATH.read_text(encoding="utf-8") + "\n" + APP_SCHEMA_PATH.read_text(encoding="utf-8")
+)
+RESOURCE_TYPES = {
+    "code": "Code",
+    "dataset": "Dataset",
+    "documentation": "Documentation",
+    "supplementary": "Supplementary material",
+    "other": "Unknown",
+}
+DB_STATUSES = {"not_analyzed": "pending", "complete": "completed"}
+UI_STATUSES = {value: key for key, value in DB_STATUSES.items()}
 
 
 def get_connection(db_path=None):
-
-
-    if db_path is None:
-        db_path = DATABASE_PATH
-
-    db_path = Path(db_path) # path object for the path.... for using function
-
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    connection = sqlite3.connect(db_path)
-    connection.row_factory = sqlite3.Row
-
-    #foreign-key enforcement
-    connection.execute("PRAGMA foreign_keys = ON")
-
-    return connection
+    """Open a persistent database, including outside a Flask request or app context."""
+    path = database_path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path, timeout=20)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    db.execute("PRAGMA synchronous=FULL")
+    return db
 
 
 def init_db(db_path=None):
+    from src.database.migrations import initialize_database
 
-    connection = get_connection(db_path)
+    initialize_database(database_path(db_path), SCHEMA)
 
-    try:
-        schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
-        connection.executescript(schema_sql)
-        connection.commit()
-
-    finally:
-        connection.close()
 
 def save_paper(paper):
+    from src.paper.discovery import identity
 
+    with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        key = identity(paper)
+        external_id = str(
+            paper.get("external_id") or paper.get("paper_id") or paper.get("arxiv_id") or key
+        )
+        existing_id = _find_existing_paper(db, paper, key, external_id)
+        if existing_id is not None:
+            return existing_id
+        cursor = db.execute(
+            """INSERT INTO papers
+            (source,external_id,title,authors,year,abstract,paper_url,pdf_url,identity,area,local_path,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                paper["source"],
+                external_id,
+                paper["title"],
+                json.dumps(_authors(paper.get("authors"))),
+                paper.get("year"),
+                paper.get("abstract") or "",
+                paper.get("paper_url"),
+                paper.get("pdf_url"),
+                key,
+                paper.get("area") or "Uncategorized",
+                paper.get("local_path"),
+                now(),
+            ),
+        )
+        return cursor.lastrowid
 
-    connection = get_connection()
-
-    try:
-        cursor = connection.cursor()
-
-        cursor.execute("""
-            insert into papers (source, external_id, title, authors, year, abstract, paper_url, pdf_url)
-            values (?, ?, ?, ?, ?, ?, ?, ?)
-            on conflict(source, external_id) DO NOTHING """,
-            (paper["source"], paper["external_id"], paper["title"], paper.get("authors"),paper.get("year"),
-            paper.get("abstract"),paper.get("paper_url"),paper.get("pdf_url")))
-        
-        cursor.execute("""
-            select id from papers
-            where source = ? AND external_id = ? """, ( paper["source"], paper["external_id"]))
-
-        paper_id = cursor.fetchone()["id"]
-        connection.commit()
-        return paper_id
-
-    finally:
-        connection.close()
 
 def get_paper_by_id(paper_id):
-    connection = get_connection()
+    with connection() as db:
+        return db.execute("SELECT * FROM papers WHERE id=?", (paper_id,)).fetchone()
 
-    try:
-        cursor = connection.execute("select * from papers where id = ?",(paper_id,))
-        return cursor.fetchone()
-
-    finally:
-        connection.close()
 
 def get_paper_by_external_id(source, external_id):
+    with connection() as db:
+        return db.execute(
+            "SELECT * FROM papers WHERE source=? AND external_id=?",
+            (source, str(external_id)),
+        ).fetchone()
 
-    connection = get_connection()
-    try:
-        cursor = connection.execute("""select * from papers where source = ? and external_id = ? """,(source, external_id))
-        return cursor.fetchone()
-
-    finally:
-        connection.close()
 
 def update_analysis_status(paper_id, status):
-
-    valid_statuses = ["pending", "completed", "partial", "failed"]
-    if status not in valid_statuses:
-        raise ValueError("Invalid analysis status")
-
-    connection = get_connection()
-
-    try:
-        if status == "pending":
-            analyzed_at = None
-        else:
-            analyzed_at = datetime.now(timezone.utc).isoformat()
-
-        cursor = connection.execute("""update papers set analysis_status = ?, last_analyzed_at = ? where id = ? """,(status, analyzed_at, paper_id))
-
-        connection.commit()
-
+    status = DB_STATUSES.get(status, status)
+    if status not in ("pending", "analyzing", "completed", "partial", "failed"):
+        raise ValueError("Invalid analysis status.")
+    with connection() as db:
+        cursor = db.execute("UPDATE papers SET analysis_status=? WHERE id=?", (status, paper_id))
         return cursor.rowcount > 0
 
-    finally:
-        connection.close()
 
-def save_resources(paper_id, resources):
-    connection = get_connection()
+def save_resources(paper_id, resources, db_path=None):
+    """Merge resource checks using either the supplied schema or checker field names."""
+    with connection(db_path) as db:
+        _write_resources(db, paper_id, resources)
 
-    try:
-        current_time = datetime.now(timezone.utc).isoformat()
-
-        resource_data = [
-            (paper_id,resource["url"],
-            resource["resource_type"],
-            resource["accessibility_status"],
-            resource.get("http_status"),
-            resource.get("error_message"),
-            resource.get("checked_at") or current_time
-            )
-            for resource in resources
-        ]
-
-        connection.executemany(
-            """ insert into resources (
-                paper_id,
-                url,
-                resource_type,
-                accessibility_status,
-                http_status,
-                error_message,
-                checked_at
-            )
-            values (?, ?, ?, ?, ?, ?, ?)
-
-            on conflict(paper_id, url)
-            do update set
-                resource_type = excluded.resource_type,
-                accessibility_status = excluded.accessibility_status,
-                http_status = excluded.http_status,
-                error_message = excluded.error_message,
-                checked_at = excluded.checked_at
-            """,
-            resource_data)
-
-        connection.commit()
-
-    except Exception:
-        connection.rollback()
-        raise
-
-    finally:
-        connection.close()
 
 def get_resources_by_paper_id(paper_id):
-    connection = get_connection()
+    with connection() as db:
+        return db.execute(
+            "SELECT * FROM resources WHERE paper_id=? ORDER BY id", (paper_id,)
+        ).fetchall()
 
+
+def update_resources(paper_id, resources, db_path=None):
+    """Replace a resource snapshot, retaining IDs for URLs that still exist."""
+    with connection(db_path) as db:
+        _write_resources(db, paper_id, resources, replace=True)
+
+
+def save_analysis(paper_id, resources, report, status):
+    """Commit a complete analysis snapshot atomically; failed writes retain the old report."""
+    status = DB_STATUSES.get(status, status)
+    if status not in ("completed", "partial"):
+        raise ValueError("A saved analysis must be completed or partial.")
+    with connection() as db:
+        _write_resources(db, paper_id, resources, replace=True)
+        cursor = db.execute(
+            "UPDATE papers SET report=?,score=?,analysis_status=?,last_analyzed_at=? WHERE id=?",
+            (json.dumps(report), report["score"], status, report["analyzed_at"], paper_id),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("Paper not found.")
+
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def database_path(db_path=None):
+    value = db_path
+    if value is None and has_app_context():
+        value = current_app.config.get("DATABASE")
+    value = str(value or DATABASE_PATH)
+    if value == ":memory:" or value.startswith("file:"):
+        raise ValueError("Use a persistent SQLite file path for DATABASE.")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+@contextmanager
+def connection(db_path=None):
+    db = get_connection(db_path)
     try:
-        cursor = connection.execute(
-            """select * from resources where paper_id = ? order by id
-            """,(paper_id,))
-
-        return cursor.fetchall()
-
+        with db:
+            yield db
     finally:
-        connection.close()
+        db.close()
 
-def update_resources(paper_id, resources):
 
-    connection = get_connection()
-    try:
-        current_time = datetime.now(timezone.utc).isoformat()
-        resource_data = [
+def _authors(value):
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            decoded = None
+        return (
+            decoded
+            if isinstance(decoded, list)
+            else [name.strip() for name in value.split(";") if name.strip()]
+        )
+    return list(value or [])
+
+
+def decode(row):
+    if row is None:
+        return None
+    paper = dict(row)
+    paper["authors"] = _authors(paper["authors"])
+    paper["analysis_status"] = UI_STATUSES.get(paper["analysis_status"], paper["analysis_status"])
+    paper["report"] = json.loads(paper["report"]) if paper["report"] else None
+    return paper
+
+
+def get_paper(paper_id):
+    return decode(get_paper_by_id(paper_id))
+
+
+def get_resources(paper_id):
+    resources = [decode_resource(row) for row in get_resources_by_paper_id(paper_id)]
+    return sorted(resources, key=lambda resource: (resource["resource_type"], resource["url"]))
+
+
+def list_papers(filters=None):
+    filters = filters or {}
+    clauses, values = [], []
+    if filters.get("q"):
+        clauses.append("(title LIKE ? OR abstract LIKE ? OR authors LIKE ?)")
+        values.extend(["%" + filters["q"] + "%"] * 3)
+    for field in ("source", "area", "analysis_status"):
+        if filters.get(field):
+            clauses.append(field + "=?")
+            values.append(
+                DB_STATUSES.get(filters[field], filters[field])
+                if field == "analysis_status"
+                else filters[field]
+            )
+    for field, operator in (("year", "="), ("min_score", ">=")):
+        if filters.get(field) not in (None, ""):
+            clauses.append(("score" if field == "min_score" else field) + operator + "?")
+            values.append(int(filters[field]))
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    order = {"newest": "id DESC", "score": "score DESC, id DESC", "year": "year DESC, id DESC"}
+    with connection() as db:
+        rows = db.execute(
+            "SELECT * FROM papers"
+            + where
+            + " ORDER BY "
+            + order.get(filters.get("sort"), "id DESC"),
+            values,
+        ).fetchall()
+    return [decode(row) for row in rows]
+
+
+def library_stats():
+    with connection() as db:
+        row = db.execute(
+            "SELECT COUNT(*) AS total, COUNT(NULLIF(report, '')) AS analyzed FROM papers"
+        ).fetchone()
+    return dict(row)
+
+
+def facets():
+    with connection() as db:
+        return {
+            field: [
+                row[0]
+                for row in db.execute(
+                    "SELECT DISTINCT "
+                    + field
+                    + " FROM papers WHERE "
+                    + field
+                    + " IS NOT NULL ORDER BY "
+                    + field
+                )
+            ]
+            for field in ("source", "area", "year")
+        }
+
+
+def decode_resource(row):
+    resource = dict(row)
+    resource["category"] = next(
+        key for key, label in RESOURCE_TYPES.items() if label == resource["resource_type"]
+    )
+    return resource
+
+
+def normalize_resource(resource):
+    resource = dict(resource)
+    category = resource.get("category")
+    label = resource.get("resource_type") or RESOURCE_TYPES.get(category, "Unknown")
+    if label not in RESOURCE_TYPES.values():
+        raise ValueError("Invalid resource type.")
+    status = resource.get("status") or {
+        "Accessible": "accessible",
+        "Inaccessible": "missing",
+        "Inconclusive": "unresolved",
+    }.get(resource.get("accessibility_status"), "unchecked")
+    broad = (
+        "Accessible"
+        if status == "accessible"
+        else ("Inaccessible" if status == "missing" else "Inconclusive")
+    )
+    note = resource.get("note") or resource.get("error_message") or ""
+    return {
+        **resource,
+        "resource_type": label,
+        "status": status,
+        "accessibility_status": broad,
+        "note": note,
+        "error_message": resource.get("error_message")
+        or (note if status != "accessible" else None),
+    }
+
+
+def _write_resources(db, paper_id, resources, replace=False):
+    resources = [normalize_resource(resource) for resource in resources]
+    if replace:
+        urls = [resource["url"] for resource in resources]
+        if urls:
+            placeholders = ",".join("?" for _ in urls)
+            db.execute(
+                f"DELETE FROM resources WHERE paper_id=? AND url NOT IN ({placeholders})",
+                [paper_id, *urls],
+            )
+        else:
+            db.execute("DELETE FROM resources WHERE paper_id=?", (paper_id,))
+    for resource in resources:
+        db.execute(
+            """INSERT INTO resources
+               (paper_id,url,resource_type,accessibility_status,status,http_status,error_message,
+                checked_at,evidence,page,final_url,note)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(paper_id,url) DO UPDATE SET
+                 resource_type=excluded.resource_type,accessibility_status=excluded.accessibility_status,
+                 status=excluded.status,http_status=excluded.http_status,error_message=excluded.error_message,
+                 checked_at=excluded.checked_at,evidence=excluded.evidence,page=excluded.page,
+                 final_url=excluded.final_url,note=excluded.note""",
             (
                 paper_id,
                 resource["url"],
                 resource["resource_type"],
                 resource["accessibility_status"],
+                resource["status"],
                 resource.get("http_status"),
                 resource.get("error_message"),
-                resource.get("checked_at") or current_time
-            )
-            for resource in resources
-        ]
+                resource.get("checked_at") or now(),
+                resource.get("evidence", ""),
+                resource.get("page"),
+                resource.get("final_url"),
+                resource["note"],
+            ),
+        )
 
 
+def _find_existing_paper(db, paper, key, external_id):
+    from src.paper.discovery import identity
 
-
-
-
-
-
-
-
-
-
-        current_urls = [resource[1] for resource in resource_data]
-        if current_urls:
-            placeholders = ",".join("?" for _ in current_urls)
-
-            connection.execute(
-                f"""delete from resources where paper_id = ? and url not in ({placeholders})
-                """,
-                [paper_id] + current_urls
-            )
-
-        else:
-            connection.execute(
-                "delete from resources where paper_id = ?",
-                (paper_id,))
-
-        connection.executemany(
-            """
-            insert into resources (
-                paper_id,url,resource_type,accessibility_status,
-                http_status, error_message, checked_at )
-            values (?, ?, ?, ?, ?, ?, ?)
-
-            
-
-
-
-            
-            on conflict(paper_id, url)
-            do update set
-                resource_type = excluded.resource_type,
-                accessibility_status = excluded.accessibility_status,
-                http_status = excluded.http_status,
-                error_message = excluded.error_message,
-                checked_at = excluded.checked_at
-            """,
-            resource_data)
-
-        connection.commit()
-
-    except Exception:
-        connection.rollback()
-        raise
-
-    finally:
-        connection.close()
-
-
-
-
-
-
-
-
-
-
-        
-
-
-
-
-
-        
+    existing = db.execute(
+        "SELECT id FROM papers WHERE identity=? OR (source=? AND external_id=?)",
+        (key, paper["source"], external_id),
+    ).fetchone()
+    if not existing and paper["source"] != "Upload":
+        for row in db.execute(
+            "SELECT id,title,identity,source FROM papers WHERE source <> 'Upload'"
+        ):
+            # Merge a title-only provider record with a canonical identifier.
+            # Distinct canonical IDs must remain distinct even if titles match.
+            if not (key.startswith("title:") or row["identity"].startswith("title:")):
+                continue
+            if identity({"title": row["title"]}) == identity({"title": paper["title"]}):
+                existing = row
+                if not key.startswith("title:"):
+                    db.execute("UPDATE papers SET identity=? WHERE id=?", (key, row["id"]))
+                    if row["source"] == paper["source"]:
+                        db.execute(
+                            "UPDATE papers SET external_id=? WHERE id=?",
+                            (external_id, row["id"]),
+                        )
+                break
+    return existing["id"] if existing else None

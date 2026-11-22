@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import app
 import pymupdf as fitz
 from flask import (
     Response,
@@ -98,7 +99,113 @@ def register_routes(app):
             "library.html", papers=list_papers(selected), filters=selected, facets=facets()
         )
 
-    ####
+    @app.route("/papers/add", methods=["GET", "POST"])
+    def add_paper():
+        """Save user-entered metadata and an optional PDF without discovery API calls."""
+        limits = {
+            "title": 300,
+            "authors": 2000,
+            "year": 4,
+            "area": 80,
+            "paper_url": 2048,
+            "pdf_url": 2048,
+            "abstract": 20000,
+        }
+        values = {field: request.form.get(field, "").strip() for field in limits}
+        errors = {}
+        if request.method == "GET":
+            return render_template("add_paper.html", values=values, errors=errors)
+        for field, maximum in limits.items():
+            if len(values[field]) > maximum:
+                errors[field] = f"Use no more than {maximum} characters."
+        if not values["title"]:
+            errors["title"] = "Enter the paper title."
+        year = None
+        if values["year"]:
+            if not re.fullmatch(r"[1-9][0-9]{3}", values["year"]):
+                errors["year"] = "Enter a four-digit publication year."
+            else:
+                year = int(values["year"])
+        for field in ("paper_url", "pdf_url"):
+            value = values[field]
+            if not value:
+                continue
+            try:
+                parts = urlsplit(value)
+                _ = parts.port
+                if (
+                    parts.scheme not in ("http", "https")
+                    or not parts.hostname
+                    or parts.username is not None
+                    or parts.password is not None
+                    or any(char.isspace() or ord(char) < 32 for char in value)
+                ):
+                    raise ValueError
+            except ValueError:
+                errors[field] = "Enter a complete HTTP or HTTPS URL without a username or password."
+        file = request.files.get("pdf")
+        data = None
+        if not errors and file and file.filename:
+            try:
+                if not file.filename.lower().endswith(".pdf"):
+                    raise ValueError("Choose a PDF file.")
+                data = file.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)
+                if len(data) > current_app.config["MAX_CONTENT_LENGTH"]:
+                    abort(413)
+                if b"%PDF-" not in data[:1024]:
+                    raise ValueError("The file is not a PDF.")
+                with fitz.open(stream=data, filetype="pdf") as document:
+                    if document.needs_pass:
+                        raise ValueError("Password-protected PDFs are not supported.")
+                    if (
+                        not document.is_pdf
+                        or not 1 <= len(document) <= current_app.config["MAX_PDF_PAGES"]
+                    ):
+                        raise ValueError("Choose a PDF with 1 to 300 pages.")
+            except (ValueError, RuntimeError, fitz.FileDataError) as error:
+                errors["pdf"] = "Could not read this PDF: " + str(error)[:250]
+        if errors:
+            return render_template("add_paper.html", values=values, errors=errors), 400
+        paper = {
+            "title": values["title"],
+            "authors": [
+                name.strip() for name in re.split(r"[;\r\n]+", values["authors"]) if name.strip()
+            ],
+            "year": year,
+            "area": values["area"] or "Uncategorized",
+            "paper_url": values["paper_url"] or None,
+            "pdf_url": values["pdf_url"] or None,
+            "abstract": values["abstract"],
+            "source": "Manual",
+        }
+        path = None
+        if data is not None:
+            paper["upload_hash"] = hashlib.sha256(data).hexdigest()
+            path = Path(current_app.config["UPLOAD_FOLDER"]) / (uuid.uuid4().hex + ".pdf")
+            path.write_bytes(data)
+            paper["local_path"] = str(path)
+        try:
+            paper_id = save_paper(paper)
+            saved = get_paper(paper_id)
+            if path and saved["local_path"] != str(path):
+                # A title-only manual entry can receive its PDF on a later submission.
+                with connection() as db:
+                    attached = db.execute(
+                        "UPDATE papers SET local_path=? WHERE id=? AND local_path IS NULL",
+                        (str(path), paper_id),
+                    ).rowcount
+                if not attached:
+                    path.unlink(missing_ok=True)
+        except Exception:
+            if path:
+                path.unlink(missing_ok=True)
+            raise
+        flash(
+            "Paper saved to your library. Choose its resource categories to start analysis.",
+            "success",
+        )
+        return redirect(url_for("detail", paper_id=paper_id))
+
     @app.route("/upload", methods=["POST"])
     def upload():
         """Validate an uploaded PDF, avoid duplicates, and save its metadata."""
@@ -282,4 +389,69 @@ def register_routes(app):
             headers={"Content-Disposition": 'attachment; filename="paperlens-library.csv"'},
         )
 
-  ####
+    @app.route("/analytics", methods=["GET"])
+    def analytics():
+        """Summarize saved reports and prepare the comparison charts."""
+        from collections import Counter, defaultdict
+        import plotly.graph_objects as go
+        from plotly.utils import PlotlyJSONEncoder
+
+        papers = list_papers()
+        analyzed = [paper for paper in papers if paper["report"]]
+        groups = {}
+        for field in ("area", "year"):
+            bucket = defaultdict(list)
+            for paper in analyzed:
+                if paper[field] is not None:
+                    bucket[str(paper[field])].append(paper["score"])
+            groups[field] = {
+                key: {"mean": round(sum(values) / len(values), 1), "count": len(values)}
+                for key, values in sorted(bucket.items())
+            }
+        status_counts = Counter()
+        for paper in analyzed:
+            status_counts.update(resource["status"] for resource in get_resources(paper["id"]))
+        charts = []
+        for field, title in (
+            ("area", "Readiness by research area"),
+            ("year", "Readiness by publication year"),
+        ):
+            group = groups[field]
+            fig = go.Figure(
+                go.Bar(
+                    x=list(group),
+                    y=[row["mean"] for row in group.values()],
+                    text=[f'n={row["count"]}' for row in group.values()],
+                    marker_color="#2563eb",
+                )
+            )
+            fig.update_layout(
+                title=title,
+                yaxis={"title": "Mean readiness score", "range": [0, 105]},
+                template="plotly_white",
+                margin={"l": 50, "r": 20, "t": 60, "b": 100},
+                height=360,
+                font={"family": "Arial"},
+            )
+            charts.append(json.loads(json.dumps(fig.to_plotly_json(), cls=PlotlyJSONEncoder)))
+        return render_template(
+            "analytics.html",
+            total=len(papers),
+            analyzed=len(analyzed),
+            average=(
+                round(sum(p["score"] for p in analyzed) / len(analyzed), 1) if analyzed else None
+            ),
+            charts=charts,
+            groups=groups,
+            statuses=status_counts,
+        )
+
+    @app.route("/assets/plotly.js", methods=["GET"])
+    def plotly_asset():
+        from plotly.offline import get_plotlyjs
+
+        return Response(
+            get_plotlyjs(),
+            mimetype="application/javascript",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )

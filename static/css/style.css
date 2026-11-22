@@ -733,3 +733,9 @@ th:last-child {
         white-space: nowrap;
     }
 }
+
+
+textarea { width: 100%; min-height: 150px; padding: 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+form > label { margin-top: 16px; }
+form > .button { margin-top: 16px; }
+

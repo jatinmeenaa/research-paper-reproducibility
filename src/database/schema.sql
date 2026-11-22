@@ -1,4 +1,3 @@
--- Table 1.:papers : stores metadata for the selected papers
 
 
 CREATE TABLE IF NOT EXISTS papers (
@@ -30,7 +29,6 @@ CREATE TABLE IF NOT EXISTS papers (
     UNIQUE (source, external_id)
 );
 
--- Table.: resources : stores unique resources belonging to papers
 
 CREATE TABLE IF NOT EXISTS resources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

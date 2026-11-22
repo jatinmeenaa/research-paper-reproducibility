@@ -239,7 +239,7 @@
     }
 }
 
-/* Match the shared section spacing at the smallest breakpoint and in print. */
+
 @media(max-width:520px) {
     .upload-section {
         padding-block: 24px;

@@ -1,20 +1,21 @@
+
 {% macro paper_card(paper) %}
     <article class="paper-card">
         <div class="card-top">
             <div class="tag-row">
                 <span class="tag">{{ paper.source }}</span>
                 {% if paper.analysis_status == "partial" %}
-                    <span class="status unresolved">Abstract only</span>
+                    <span class="status unresolved">Incomplete coverage</span>
                 {% elif paper.analysis_status == "failed" %}
                     <span class="status missing">Analysis failed</span>
                 {% endif %}
                 <span class="meta">{{ paper.year or 'Year unknown' }}</span>
             </div>
-            {% if paper.report %}
+            {% if paper.report and paper.score is not none %}
                 <span class="score-pill">{{ paper.score }}/100</span>
-            {% else %}++
-
-            
+            {% elif paper.report %}
+                <span class="status unchecked">Not scored</span>
+            {% else %}
                 <span class="status unchecked">Not analyzed</span>
             {% endif %}
         </div>
@@ -84,3 +85,4 @@
         </button>
     </form>
 {% endmacro %}
+

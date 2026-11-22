@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block title %}
     {{ paper.title }}
@@ -74,23 +75,23 @@
             {% endif %}
             {% if paper.report %}
                 <article class="panel score-panel">
-                    <div class="score-ring" style="--score: {{ paper.score }}">
+                    <div class="score-ring" style="--score: {{ paper.score or 0 }}">
                         <div>
-                            <strong>{{ paper.score }}</strong>
-                            <span>/ 100</span>
+                            <strong>{{ paper.score if paper.score is not none else '—' }}</strong>
+                            <span>{{ '/ 100' if paper.score is not none else 'Not scored' }}</span>
                         </div>
                     </div>
                     <div>
-                        <span class="eyebrow">RESOURCE READINESS</span>
+                        <span class="eyebrow">LINK ACCESSIBILITY</span>
                         <h2>{{ paper.report.label }}</h2>
                         <p class="muted">
-                            {{ paper.report.scope }} · {{ paper.report.resource_count }} links checked
+                            {{ paper.report.scope }} · {{ paper.report.checked_count }} of {{ paper.report.resource_count }} links checked
                             {% if paper.report.pages %}
                                 · {{ paper.report.pages }} {{ 'page' if paper.report.pages == 1 else 'pages' }}
                             {% endif %}
                         </p>
                         <p class="meta">
-                            Checked {{ paper.report.analyzed_at[:19] | replace('T', ' ') }} UTC · rubric v{{ paper.report.version }}
+                            Checked {{ paper.report.analyzed_at[:19] | replace('T', ' ') }} UTC · scoring v{{ paper.report.version }}
                         </p>
                         <p class="meta">An availability snapshot, not a guarantee of reproducibility.</p>
                     </div>
@@ -105,39 +106,30 @@
                     </div>
                     <div class="table-wrap">
                         <table>
-                            <caption class="sr-only">
-                                Score breakdown by applicable resource category
-                            </caption>
-                            <thead>
-                                <tr>
-                                    <th>Resource</th>
-                                    <th>Evidence</th>
-                                    <th>Points</th>
-                                </tr>
-                            </thead>
+                            <caption class="sr-only">Link counts by category; all links count equally</caption>
+                            <thead><tr><th>Category</th><th>Extracted links</th><th>Accessible links</th></tr></thead>
                             <tbody>
                                 {% for row in paper.report.breakdown %}
-                                    <tr>
-                                        <td>{{ row.label }}</td>
-                                        <td>
-                                            {% if not row.applicable %}
-                                                <span class="meta">Excluded by reviewer</span>
-                                            {% elif row.accessible %}
-                                                <span class="status accessible">{{ row.accessible }} accessible</span>
-                                            {% elif row.discovered %}
-                                                <span class="status unresolved">{{ row.discovered }} links; none verified accessible</span>
-                                            {% else %}
-                                                <span class="meta">No matching links detected</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>{{ row.earned }} / {{ row.weight if row.applicable else '—' }}</td>
-                                    </tr>
+                                    <tr><td>{{ row.label }}</td><td>{{ row.discovered }}</td><td>{{ row.accessible }}</td></tr>
+                                {% else %}
+                                    <tr><td colspan="3">No extracted links to score.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
                     </div>
                     <p class="meta formula">
-                        {{ paper.report.earned }} ÷ {{ paper.report.denominator }} × 100 = {{ paper.score }}. Excluded categories are removed from the denominator.
+                        {% if paper.score is not none %}
+                            {{ paper.report.earned }} accessible ÷ {{ paper.report.denominator }} extracted links × 100 = {{ paper.score }}/100.
+                        {% else %}
+                            Not scored: no links were checked. This does not establish that resources are absent.
+                        {% endif %}
+                        Every distinct URL has equal weight, including Other links. Missing categories do not reduce the score.
+                    </p>
+                    <p class="meta">
+                        Restricted, unresolved, or blocked links are not verified accessible; they are not necessarily missing.
+                        {% if paper.report.candidate_count > paper.report.resource_count %}
+                            This saved report checked only {{ paper.report.resource_count }} of {{ paper.report.candidate_count }} extracted links. Recheck resources to check all links.
+                        {% endif %}
                     </p>
                 </section>
             {% else %}
@@ -145,7 +137,7 @@
                     <span class="eyebrow">READY TO INSPECT</span>
                     <h2>Turn this paper into an evidence trail</h2>
                     <p>
-                        Choose the resource types relevant to this paper, then start analysis. We’ll extract PDF links, check availability, and explain every point.
+                        Start analysis to extract PDF links, check their availability, and calculate an equal-link accessibility score.
                     </p>
                     <p class="meta">
                         Checks contact external resource hosts. Full datasets and source repositories are not downloaded.
@@ -161,37 +153,16 @@
                     Analyze this paper
                 {% endif %}
             </h2>
-            <p class="muted">Which resources does this paper need?</p>
-            <form action="{{ url_for('main.analyze_paper', paper_id=paper.id) }}"
-                  method="post"
-                  data-busy>
+            <p class="muted">Check every extracted link with equal weight, regardless of category.</p>
+            <form action="{{ url_for('main.analyze_paper', paper_id=paper.id) }}" method="post" data-busy>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <fieldset {% if paper.analysis_status == 'analyzing' %}disabled{% endif %}>
-                    <legend class="sr-only">Applicable resource categories</legend>
-                    {% for category, label in [('code','Source code'),('dataset','Datasets'),('documentation','Documentation'),('supplementary','Supplementary material')] %}
-                        <label class="checkbox-row">
-                            <input type="checkbox"
-                                   name="applicable"
-                                   value="{{ category }}"
-                                   {% if not paper.report or category in paper.report.applicable %}checked{% endif %}>
-                            <span>{{ label }}</span>
-                            <span class="meta">{{ weights[category] }} pts</span>
-                        </label>
-                    {% endfor %}
-                    <button class="button primary" type="submit">
-                        {% if paper.analysis_status == "analyzing" %}
-                            Analysis running…
-                        {% elif paper.report %}
-                            Recheck resources ↻
-                        {% else %}
-                            Start analysis →
-                        {% endif %}
-                    </button>
-                </fieldset>
+                <button class="button primary" type="submit" {% if paper.analysis_status == 'analyzing' %}disabled{% endif %}>
+                    {% if paper.analysis_status == 'analyzing' %}Analysis running…
+                    {% elif paper.report %}Recheck resources ↻
+                    {% else %}Start analysis →{% endif %}
+                </button>
             </form>
-            <p class="meta">
-                All categories are selected initially. Uncheck those that do not apply. Changing this choice changes the score’s meaning.
-            </p>
+            <p class="meta">Score = verified accessible links divided by extracted links. Categories are labels only. Checks measure availability, not successful reproduction of experiments.</p>
         </aside>
     </section>
     {% if paper.report %}
@@ -215,7 +186,7 @@
                 </label>
             </div>
             <p class="muted">
-                Review context to confirm a link belongs to this paper. Correcting its category recalculates the score.
+                Review context to confirm a link belongs to this paper. Correcting a category changes its label only; every link keeps equal weight.
             </p>
             <div class="resource-list">
                 {% for resource in resources %}
@@ -298,3 +269,4 @@
         </section>
     {% endif %}
 {% endblock %}
+

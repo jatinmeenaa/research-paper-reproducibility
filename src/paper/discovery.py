@@ -22,7 +22,6 @@ def identity(paper):
     url = paper.get("paper_url") or ""
     if "arxiv.org/abs/" in url:
         return "arxiv:" + re.sub(r"v\d+$", "", url.split("/abs/")[-1])
-    # Cross-provider deduplication fallback when identifiers are absent.
     title = re.sub(r"[^\w]", "", paper["title"].casefold())
     return "title:" + hashlib.sha256(title.encode()).hexdigest()
 

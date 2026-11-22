@@ -1,5 +1,6 @@
+
 {% extends "base.html" %}
-{% from "_cards.html" import paper_card %}
+{% from "card.html" import paper_card %}
 {% block title %}
     Saved library
 {% endblock %}
@@ -13,7 +14,7 @@
         <div class="section-heading">
             <div>
                 <h1>Paper library</h1>
-                <p class="muted">Saved discoveries, uploaded papers, and resource-readiness reports.</p>
+                <p class="muted">Saved discoveries, uploaded papers, and resource accessibility reports.</p>
             </div>
             <a class="button secondary"
                href="{{ url_for('main.library_csv', **request.args.to_dict()) }}">
@@ -45,7 +46,7 @@
                     {% endfor %}
                 </select>
             {% endfor %}
-            <label for="filter-score">Minimum readiness score</label>
+            <label for="filter-score">Minimum link accessibility score</label>
             <input id="filter-score"
                    type="number"
                    min="0"
@@ -65,7 +66,7 @@
             </select>
             <label for="filter-sort">Sort by</label>
             <select id="filter-sort" name="sort">
-                {% for value, label in [('newest','Recently saved'),('score','Highest readiness'),('year','Publication year')] %}
+                {% for value, label in [('newest','Recently saved'),('score','Highest link accessibility'),('year','Publication year')] %}
                     <option value="{{ value }}"
                             {% if filters.sort == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
@@ -91,3 +92,4 @@
         </div>
     </section>
 {% endblock %}
+

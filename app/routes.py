@@ -1,4 +1,3 @@
-
 import csv
 import hashlib
 import io
@@ -8,7 +7,6 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import app
 import pymupdf as fitz
 from flask import (
     Response,abort,current_app,flash,
@@ -28,7 +26,6 @@ from src.database.db import (
 )
 from src.paper.discovery import discover
 from src.parser import CATEGORIES
-from src.scoring import WEIGHTS
 
 
 def paper_or_404(paper_id):
@@ -180,7 +177,6 @@ def register_routes(app):
             paper_id = save_paper(paper)
             saved = get_paper(paper_id)
             if path and saved["local_path"] != str(path):
-                # A title-only manual entry can receive its PDF on a later submission.
                 with connection() as db:
                     attached = db.execute(
                         "UPDATE papers SET local_path=? WHERE id=? AND local_path IS NULL",
@@ -193,10 +189,10 @@ def register_routes(app):
                 path.unlink(missing_ok=True)
             raise
         flash(
-            "Paper saved to your library. Choose its resource categories to start analysis.",
+            "Paper saved to your library. Start analysis to check every extracted link.",
             "success",
         )
-        return redirect(url_for("detail", paper_id=paper_id))
+        return redirect(url_for("main.detail", paper_id=paper_id))
 
     @app.route("/upload", methods=["POST"])
     def upload():
@@ -204,7 +200,7 @@ def register_routes(app):
         file = request.files.get("pdf")
         if not file or not file.filename or Path(file.filename).suffix.lower() != ".pdf":
             flash("Choose a PDF file to upload.", "error")
-            return redirect(url_for("home"))
+            return redirect(url_for("main.home"))
         year = request.form.get("year", "").strip()
         if year:
             try:
@@ -213,7 +209,7 @@ def register_routes(app):
                     raise ValueError
             except ValueError:
                 flash("Enter a valid four-digit publication year.", "error")
-                return redirect(url_for("home", _anchor="upload"))
+                return redirect(url_for("main.home", _anchor="upload"))
         else:
             year = None
         data = file.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)
@@ -237,7 +233,7 @@ def register_routes(app):
                 )
         except (ValueError, RuntimeError, fitz.FileDataError) as exc:
             flash("Could not read this PDF: " + str(exc)[:250], "error")
-            return redirect(url_for("home"))
+            return redirect(url_for("main.home"))
         fingerprint = hashlib.sha256(data).hexdigest()
         with connection() as db:
             existing = db.execute(
@@ -245,7 +241,7 @@ def register_routes(app):
             ).fetchone()
         if existing:
             flash("This PDF is already in your library.", "info")
-            return redirect(url_for("detail", paper_id=existing["id"]))
+            return redirect(url_for("main.detail", paper_id=existing["id"]))
         path = Path(current_app.config["UPLOAD_FOLDER"]) / (uuid.uuid4().hex + ".pdf")
         path.write_bytes(data)
         try:
@@ -263,8 +259,10 @@ def register_routes(app):
         except Exception:
             path.unlink(missing_ok=True)
             raise
-        flash("PDF saved. Choose applicable categories and start analysis.", "success")
-        return redirect(url_for("detail", paper_id=paper_id))
+        if get_paper(paper_id)["local_path"] != str(path):
+            path.unlink(missing_ok=True)
+        flash("PDF saved. Start analysis to check every extracted link.", "success")
+        return redirect(url_for("main.detail", paper_id=paper_id))
 
     @app.route("/papers/<int:paper_id>", methods=["GET"])
     def detail(paper_id):
@@ -275,23 +273,16 @@ def register_routes(app):
             resources=get_resources(paper_id),
             job=latest_job(paper_id),
             categories=CATEGORIES,
-            weights=WEIGHTS,
         )
 
     @app.route("/papers/<int:paper_id>/analyze", methods=["POST"])
     def analyze_paper(paper_id):
         paper_or_404(paper_id)
-        applicable = [
-            category for category in request.form.getlist("applicable") if category in WEIGHTS
-        ]
-        if not applicable:
-            flash("Select at least one applicable category.", "error")
-        else:
-            try:
-                start_analysis(paper_id, applicable)
-            except ValueError as exc:
-                flash(str(exc), "error")
-        return redirect(url_for("detail", paper_id=paper_id))
+        try:
+            start_analysis(paper_id)
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("main.detail", paper_id=paper_id))
 
     @app.route("/papers/<int:paper_id>/status", methods=["GET"])
     def analysis_status(paper_id):
@@ -315,14 +306,14 @@ def register_routes(app):
                 == "analyzing"
             ):
                 flash("Wait for analysis to finish before editing categories.", "info")
-                return redirect(url_for("detail", paper_id=paper_id))
-            db.execute(
-                "UPDATE resources SET resource_type=? WHERE id=?",
-                (RESOURCE_TYPES[category], resource_id),
-            )
-        rescore(paper_id)
-        flash("Category updated and score recalculated.", "success")
-        return redirect(url_for("detail", paper_id=paper_id, _anchor="resources"))
+                return redirect(url_for("main.detail", paper_id=paper_id))
+        try:
+            rescore(paper_id, resource_id=resource_id, category=category)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.detail", paper_id=paper_id))
+        flash("Category updated. All links keep equal weight in the score.", "success")
+        return redirect(url_for("main.detail", paper_id=paper_id, _anchor="resources"))
 
     @app.route("/papers/<int:paper_id>/report.json", methods=["GET"])
     def report_json(paper_id):
@@ -353,7 +344,7 @@ def register_routes(app):
                 "Area",
                 "Source",
                 "Status",
-                "Readiness score",
+                "Link accessibility score",
                 "Analyzed at",
                 "Paper URL",
             ]
@@ -389,10 +380,11 @@ def register_routes(app):
 
         papers = list_papers()
         analyzed = [paper for paper in papers if paper["report"]]
+        scored = [paper for paper in analyzed if paper["score"] is not None]
         groups = {}
         for field in ("area", "year"):
             bucket = defaultdict(list)
-            for paper in analyzed:
+            for paper in scored:
                 if paper[field] is not None:
                     bucket[str(paper[field])].append(paper["score"])
             groups[field] = {
@@ -404,8 +396,8 @@ def register_routes(app):
             status_counts.update(resource["status"] for resource in get_resources(paper["id"]))
         charts = []
         for field, title in (
-            ("area", "Readiness by research area"),
-            ("year", "Readiness by publication year"),
+            ("area", "Link accessibility by research area"),
+            ("year", "Link accessibility by publication year"),
         ):
             group = groups[field]
             fig = go.Figure(
@@ -418,7 +410,7 @@ def register_routes(app):
             )
             fig.update_layout(
                 title=title,
-                yaxis={"title": "Mean readiness score", "range": [0, 105]},
+                yaxis={"title": "Mean link accessibility score", "range": [0, 105]},
                 template="plotly_white",
                 margin={"l": 50, "r": 20, "t": 60, "b": 100},
                 height=360,
@@ -430,7 +422,7 @@ def register_routes(app):
             total=len(papers),
             analyzed=len(analyzed),
             average=(
-                round(sum(p["score"] for p in analyzed) / len(analyzed), 1) if analyzed else None
+                round(sum(p["score"] for p in scored) / len(scored), 1) if scored else None
             ),
             charts=charts,
             groups=groups,
@@ -446,3 +438,7 @@ def register_routes(app):
             mimetype="application/javascript",
             headers={"Cache-Control": "public, max-age=86400"},
         )
+
+    @app.route("/methodology", methods=["GET"])
+    def methodology():
+        return render_template("methodology.html")

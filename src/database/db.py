@@ -335,8 +335,6 @@ def _find_existing_paper(db, paper, key, external_id):
         for row in db.execute(
             "SELECT id,title,identity,source FROM papers WHERE source <> 'Upload'"
         ):
-            # Merge a title-only provider record with a canonical identifier.
-            # Distinct canonical IDs must remain distinct even if titles match.
             if not (key.startswith("title:") or row["identity"].startswith("title:")):
                 continue
             if identity({"title": row["title"]}) == identity({"title": paper["title"]}):

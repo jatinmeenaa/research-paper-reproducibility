@@ -1,0 +1,29 @@
+
+{% extends "base.html" %}
+{% block title %}Add a paper{% endblock %}
+{% block content %}
+<section class="container section narrow">
+    <a href="{{ url_for('main.library') }}">← Library</a>
+    <div class="panel">
+        <h1>Add a paper</h1>
+        <p class="muted">Save paper details and optionally attach a PDF or public PDF URL.</p>
+        <form action="{{ url_for('main.add_paper') }}" method="post" enctype="multipart/form-data" data-busy>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% for field, label, limit in [('title','Title',300), ('authors','Authors (separate with semicolons)',2000), ('year','Publication year',4), ('area','Research area',80), ('paper_url','Original paper URL',2048), ('pdf_url','Public PDF URL',2048), ('abstract','Abstract',20000)] %}
+                <label for="{{ field }}">{{ label }}{% if field != 'title' %} (optional){% endif %}</label>
+                {% if field == 'abstract' %}
+                    <textarea id="{{ field }}" name="{{ field }}" rows="6" maxlength="{{ limit }}">{{ values.get(field, '') }}</textarea>
+                {% else %}
+                    <input id="{{ field }}" name="{{ field }}" maxlength="{{ limit }}" value="{{ values.get(field, '') }}" {% if field == 'title' %}required{% endif %} {% if field in ['paper_url','pdf_url'] %}type="url"{% endif %}>
+                {% endif %}
+                {% if errors.get(field) %}<p class="notice error" role="alert">{{ errors[field] }}</p>{% endif %}
+            {% endfor %}
+            <label for="manual-pdf">PDF file (optional, up to 20 MB)</label>
+            <input id="manual-pdf" name="pdf" type="file" accept=".pdf,application/pdf">
+            {% if errors.get('pdf') %}<p class="notice error" role="alert">{{ errors['pdf'] }}</p>{% endif %}
+            <button class="button primary" type="submit">Save paper</button>
+        </form>
+    </div>
+</section>
+{% endblock %}
+

@@ -12,6 +12,8 @@ _last_request = 0.0
 def search_arxiv(query, max_results=10):
     global _last_request
     terms = re.findall(r"[\w.-]+", query, flags=re.UNICODE)
+    if not terms:
+        return []
     params = {
         "search_query":" AND ".join(
             'all:"' + term + '"' for term in terms
@@ -23,18 +25,15 @@ def search_arxiv(query, max_results=10):
     }
     with _lock:
         time.sleep(max(0, 3 - (time.monotonic() - _last_request)))
-
-    try:
-      response = requests.get(
-        ARXIV_API,
-        params=params,
-        timeout=(8, 25),
-        headers={
-                    "User-Agent": "PaperLens/1.0 (academic resource explorer)"
-                }
-       )
-      response.raise_for_status()
-    finally:
+        try:
+            response = requests.get(
+                ARXIV_API,
+                params=params,
+                timeout=(8, 25),
+                headers={"User-Agent": "PaperLens/1.0 (academic resource explorer)"},
+            )
+            response.raise_for_status()
+        finally:
             _last_request = time.monotonic()
 
     feed = feedparser.parse(response.content)
@@ -42,7 +41,7 @@ def search_arxiv(query, max_results=10):
         raise ValueError(
             "arXiv returned an unreadable response. Please try again later."
         )
-    
+
     papers = []
 
     for entry in feed.entries:
@@ -88,11 +87,11 @@ def search_arxiv(query, max_results=10):
             "source": "arXiv",
         }
 
-        
+
         papers.append(paper)
 
     return papers
-      
+
 if __name__ == "__main__":
     for paper in search_arxiv("computer vision", 3):
         print(paper["title"], paper["pdf_url"])

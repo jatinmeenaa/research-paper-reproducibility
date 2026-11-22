@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block title %}
     Research analytics
@@ -30,7 +31,7 @@
                 <strong>{{ analyzed }}</strong>
             </article>
             <article class="panel stat">
-                <span>Mean readiness</span>
+                <span>Mean link accessibility</span>
                 <strong>
                     {{ average if average is not none else '—' }}
                     <small>
@@ -43,14 +44,14 @@
         </div>
         {% if analyzed %}
             <div class="notice warning">
-                These are descriptive statistics for your saved sample, including partial reports. Reviewer-selected categories and provider-specific area labels may differ between papers. Scores do not establish reproducibility or support population-level conclusions.
+                These are descriptive statistics for your saved sample, including partial reports. Each score counts all saved links equally. Reports with no checked links are excluded from means; paper coverage can differ. Scores do not establish reproducibility or support population-level conclusions.
             </div>
             <div class="chart-grid">
                 {% for chart in charts %}
                     <div class="panel chart-panel">
                         <div id="chart-{{ loop.index }}"
                              class="chart"
-                             aria-label="{{ 'Mean readiness by area' if loop.index == 1 else 'Mean readiness by year' }}">
+                             aria-label="{{ 'Mean link accessibility by area' if loop.index == 1 else 'Mean link accessibility by year' }}">
                         </div>
                     </div>
                 {% endfor %}
@@ -109,3 +110,4 @@
         {% endif %}
     </section>
 {% endblock %}
+

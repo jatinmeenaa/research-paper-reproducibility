@@ -5,6 +5,25 @@ import ssl
 import time
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
+import os
+from pathlib import Path
+
+import certifi
+
+
+def tls_context():
+    context = ssl.create_default_context()
+    bundle = (
+        os.environ.get("REQUESTS_CA_BUNDLE")
+        or os.environ.get("CURL_CA_BUNDLE")
+        or certifi.where()
+    )
+    if Path(bundle).is_dir():
+        context.load_verify_locations(capath=bundle)
+    else:
+        context.load_verify_locations(cafile=bundle)
+    return context
+
 
 class UnsafeURL(ValueError):
     pass
@@ -41,7 +60,7 @@ def validate_url(url):
 
 class PinnedHTTPS(http.client.HTTPSConnection):
     def __init__(self, host, address, timeout):
-        super().__init__(host, timeout=timeout, context=ssl.create_default_context())
+        super().__init__(host, timeout=timeout, context=tls_context())
         self.address = address
 
     def connect(self):

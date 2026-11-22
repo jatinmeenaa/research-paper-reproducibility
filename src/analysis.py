@@ -22,7 +22,6 @@ from src.scoring import calculate_score
 
 
 _executor = ThreadPoolExecutor(max_workers=2)
-MAX_LINKS = 60
 
 LIMITATIONS = [
     "HTTP availability does not establish reproducibility.",
@@ -30,7 +29,8 @@ LIMITATIONS = [
     "Detected links may belong to cited papers.",
     "Scanned PDFs require OCR, which is not included.",
     "Network errors and access restrictions create uncertainty.",
-    f"At most {MAX_LINKS} links are checked per report.",
+    "Every distinct extracted URL has equal weight, including Other links.",
+    "Only extracted links can be assessed; missing or unlinked resources are not penalized.",
 ]
 
 def latest_job(paper_id):
@@ -108,8 +108,7 @@ def recover_interrupted_jobs():
         )
 
 
-def start_analysis(paper_id, applicable):
-    selected = calculate_score([], applicable)["applicable"]
+def start_analysis(paper_id, applicable=None):
     app = current_app._get_current_object()
     job_id = uuid.uuid4().hex
 
@@ -147,7 +146,7 @@ def start_analysis(paper_id, applicable):
 
     try:
         _executor.submit(
-            _run_analysis, app, job_id, paper_id, selected
+            _run_analysis, app, job_id, paper_id
         )
     except Exception:
         _fail_job(job_id, paper_id)
@@ -207,7 +206,7 @@ def _extract(paper):
 
 
 
-def _run_analysis(app, job_id, paper_id, applicable):
+def _run_analysis(app, job_id, paper_id):
     with app.app_context():
         try:
             _set_stage(job_id, "Reading paper")
@@ -228,20 +227,8 @@ def _run_analysis(app, job_id, paper_id, applicable):
             for resource in links_from_text(abstract):
                 candidates.setdefault(resource["url"], resource)
 
-            resources = sorted(
-                candidates.values(),
-                key=lambda item: item["category"] == "other",
-            )
+            resources = list(candidates.values())
             candidate_count = len(resources)
-
-            if candidate_count > MAX_LINKS:
-                warnings.append(
-                    f"Detected {candidate_count} links; only the "
-                    f"first {MAX_LINKS} were checked, prioritizing "
-                    "recognized resource categories."
-                )
-
-            resources = resources[:MAX_LINKS]
 
             _set_stage(
                 job_id,
@@ -256,7 +243,7 @@ def _run_analysis(app, job_id, paper_id, applicable):
             _set_stage(job_id, "Calculating and saving report")
 
             report = {
-                **calculate_score(checked, applicable),
+                **calculate_score(checked),
                 "scope": scope,
                 "pages": extracted["pages"],
                 "analyzed_at": now(),
@@ -296,7 +283,7 @@ def _run_analysis(app, job_id, paper_id, applicable):
             _fail_job(job_id, paper_id)
 
 
-def rescore(paper_id):
+def rescore(paper_id, resource_id=None, category=None):
     with connection() as db:
         db.execute("BEGIN IMMEDIATE")
 
@@ -314,6 +301,17 @@ def rescore(paper_id):
         if not paper["report"]:
             raise ValueError("Analyze this paper first.")
 
+        if resource_id is not None:
+            from src.database.db import RESOURCE_TYPES
+            if category not in RESOURCE_TYPES:
+                raise ValueError("Invalid resource category.")
+            changed = db.execute(
+                "UPDATE resources SET resource_type=? WHERE id=? AND paper_id=?",
+                (RESOURCE_TYPES[category], resource_id, paper_id),
+            ).rowcount
+            if not changed:
+                raise ValueError("Resource not found.")
+
         resources = [
             decode_resource(row)
             for row in db.execute(
@@ -323,12 +321,9 @@ def rescore(paper_id):
         ]
 
         report = json.loads(paper["report"])
-        report.update(
-            calculate_score(
-                resources,
-                report.get("applicable"),
-            )
-        )
+        report.update(calculate_score(resources))
+        report.setdefault("candidate_count", len(resources))
+        report.pop("applicable", None)
         report["rescored_at"] = now()
 
         db.execute(
@@ -345,6 +340,17 @@ def rescore(paper_id):
         )
 
     return report
+
+
+def upgrade_saved_scores():
+    from src.scoring import VERSION
+    with connection() as db:
+        rows = db.execute(
+            "SELECT id,report FROM papers WHERE report IS NOT NULL AND analysis_status <> 'analyzing'"
+        ).fetchall()
+    for row in rows:
+        if json.loads(row["report"]).get("version") != VERSION:
+            rescore(row["id"])
 
 
 

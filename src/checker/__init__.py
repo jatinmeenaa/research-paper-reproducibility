@@ -12,7 +12,6 @@ def check_resource(resource):
     try:
         response = fetch(resource["url"], method="HEAD", timeout=10)
         if response["status"] in (405, 501):
-            # A small ranged GET handles servers which do not implement HEAD.
             try:
                 response = fetch(
                     resource["url"], max_bytes=65536, timeout=10, headers={"Range": "bytes=0-1023"}
@@ -40,6 +39,11 @@ def check_resource(resource):
             )
     except UnsafeURL as exc:
         result.update(status="blocked", note=str(exc))
+    except ssl.SSLCertVerificationError:
+        result["note"] = (
+            "Certificate verification failed. Check the trusted CA bundle; "
+            "resource availability could not be determined."
+        )
     except (OSError, ssl.SSLError, socket.timeout, http.client.HTTPException, ValueError):
         result["note"] = "Could not establish availability (DNS, TLS, timeout, or redirect error)."
     return result

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Upload research paper{% endblock %}
+{% block content %}
+<section class="container page-head">
+    <h1>Upload research paper</h1>
+</section>
+<section class="container section">
+    <form class="panel" action="{{ url_for('main.upload') }}" method="post" enctype="multipart/form-data" data-busy>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="upload-pdf">PDF file</label>
+        <input id="upload-pdf" name="pdf" type="file" accept=".pdf,application/pdf" required>
+        <p class="meta">Maximum 20 MB · 300 pages</p>
+        <label for="upload-title">Title (optional)</label>
+        <input id="upload-title" name="title" maxlength="300">
+        <label for="upload-year">Year (optional)</label>
+        <input id="upload-year" name="year" type="number" min="1000" max="9999">
+        <label for="upload-area">Research area (optional)</label>
+        <input id="upload-area" name="area" maxlength="80">
+        <button class="button primary" type="submit">Upload PDF</button>
+    </form>
+</section>
+{% endblock %}

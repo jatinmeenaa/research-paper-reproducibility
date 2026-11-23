@@ -134,17 +134,5 @@ document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("resource-filter-empty").hidden = shown > 0;
         });
     }
-    const chartData = document.getElementById("chart-data");
-    if (chartData && window.Plotly) {
-        try {
-            JSON.parse(chartData.textContent).forEach((figure, index) => {
-                window.Plotly.newPlot("chart-" + (index + 1), figure.data, figure
-                    .layout, {
-                        responsive: true,
-                        displayModeBar: false
-                    });
-            });
-        } catch (_) {
-            }
-    }
+    
 });

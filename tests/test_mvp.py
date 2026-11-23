@@ -36,7 +36,7 @@ class MVPTests(unittest.TestCase):
         self.directory.cleanup()
 
     def token(self):
-        self.client.get('/')
+        self.client.get('/upload')
         with self.client.session_transaction() as session:
             return session['csrf_token']
 
@@ -74,9 +74,9 @@ class MVPTests(unittest.TestCase):
         self.fail('Analysis did not finish')
 
     def test_pages_assets_and_errors(self):
-        for path in ('/', '/health', '/search', '/library', '/analytics',
+        for path in ('/', '/health', '/search', '/upload', '/library', 
                      '/papers/add', '/library/stats',
-                     '/static/css/style.css', '/static/js/app.js', '/assets/plotly.js'):
+                     '/static/css/style.css', '/static/js/app.js'):
             with self.subTest(path=path):
                 with self.client.get(path) as response:
                     self.assertEqual(response.status_code, 200)
@@ -133,7 +133,6 @@ class MVPTests(unittest.TestCase):
         self.assertEqual(len(resources), 2)
         self.assertTrue(all(resource['page'] == 1 for resource in resources))
         self.assertEqual(self.client.get(location).status_code, 200)
-        self.assertEqual(self.client.get('/analytics').status_code, 200)
 
         code = next(r for r in resources if r['category'] == 'code')
         response = self.client.post(f"/resources/{code['id']}/category", data={
@@ -305,7 +304,7 @@ class MVPTests(unittest.TestCase):
         self.assertEqual(calculate_score([links[0]])['score'], 100)
         self.assertEqual(calculate_score([links[2]])['score'], 0)
 
-    def test_no_links_is_not_scored_and_analytics_remain_valid(self):
+    def test_no_links_is_not_scored_and_pages_remain_valid(self):
         response = self.client.post('/papers/add', data={
             'csrf_token': self.token(), 'title': 'Paper without URLs',
         })
@@ -315,7 +314,7 @@ class MVPTests(unittest.TestCase):
         self.wait(paper_id)
         with self.app.app_context():
             self.assertIsNone(get_paper(paper_id)['score'])
-        for path in (location, '/library', '/', '/analytics'):
+        for path in (location, '/library', '/'):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
         self.assertIn(b'Not scored', self.client.get(location).data)

@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import http.client
 import io
 import json
 import re
@@ -10,10 +11,12 @@ from urllib.parse import urlsplit
 import pymupdf as fitz
 from flask import (
     Response,abort,current_app,flash,
-    jsonify,redirect,render_template,request,url_for,
+    jsonify,redirect,render_template,request,send_file,url_for,
 )
+from werkzeug.utils import secure_filename
 
 from src.analysis import latest_job, rescore, start_analysis
+from src.checker.network import download_pdf
 from src.database.db import (
     RESOURCE_TYPES,
     connection,
@@ -35,12 +38,37 @@ def paper_or_404(paper_id):
     return paper
 
 
+def paper_pdf_source(paper):
+    if paper["local_path"]:
+        path = Path(paper["local_path"]).resolve()
+        folder = Path(current_app.config["UPLOAD_FOLDER"]).resolve()
+        if not path.is_relative_to(folder) or not path.is_file():
+            abort(404, description="The uploaded PDF is no longer available.")
+        if path.stat().st_size > current_app.config["MAX_CONTENT_LENGTH"]:
+            abort(413, description="The PDF exceeds the download size limit.")
+        return path
+    if not paper["pdf_url"]:
+        abort(404, description="This paper has no PDF. Upload a PDF or provide a PDF URL.")
+    try:
+        return io.BytesIO(download_pdf(paper["pdf_url"]))
+    except (OSError, ValueError, RuntimeError, http.client.HTTPException):
+        current_app.logger.warning("Could not retrieve PDF for paper %s", paper["id"], exc_info=True)
+        abort(502, description="The PDF could not be retrieved from its source. Please try again later.")
+
+
+def paper_pdf_filename(paper):
+    title = secure_filename(paper["title"])[:160] or f"paper-{paper['id']}"
+    return title if title.lower().endswith(".pdf") else title + ".pdf"
+
+
 def filters():
     result = {
         key: request.args.get(key, "").strip()
         for key in ("q", "source", "area", "year", "min_score", "sort", "analysis_status")
     }
     result["q"] = result["q"][:200]
+    if result["sort"] not in ("score", "newest", "year"):
+        result["sort"] = "score"
     for key, low, high in (("year", 1000, 9999), ("min_score", 0, 100)):
         if result[key]:
             try:
@@ -55,12 +83,7 @@ def register_routes(app):
 
     @app.route("/", methods=["GET"])
     def home():
-        papers = list_papers()
-        return render_template(
-            "index.html",
-            recent=papers[:3],
-            **library_stats(),
-        )
+        return redirect(url_for("main.search", **request.args.to_dict()))
 
     @app.route("/library/stats", methods=["GET"])
     def library_statistics():
@@ -194,13 +217,15 @@ def register_routes(app):
         )
         return redirect(url_for("main.detail", paper_id=paper_id))
 
-    @app.route("/upload", methods=["POST"])
+    @app.route("/upload", methods=["GET", "POST"])
     def upload():
         """Validate an uploaded PDF, avoid duplicates, and save its metadata."""
+        if request.method == "GET":
+            return render_template("upload.html")
         file = request.files.get("pdf")
         if not file or not file.filename or Path(file.filename).suffix.lower() != ".pdf":
             flash("Choose a PDF file to upload.", "error")
-            return redirect(url_for("main.home"))
+            return redirect(url_for("main.upload"))
         year = request.form.get("year", "").strip()
         if year:
             try:
@@ -209,7 +234,7 @@ def register_routes(app):
                     raise ValueError
             except ValueError:
                 flash("Enter a valid four-digit publication year.", "error")
-                return redirect(url_for("main.home", _anchor="upload"))
+                return redirect(url_for("main.upload"))
         else:
             year = None
         data = file.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)
@@ -233,7 +258,7 @@ def register_routes(app):
                 )
         except (ValueError, RuntimeError, fitz.FileDataError) as exc:
             flash("Could not read this PDF: " + str(exc)[:250], "error")
-            return redirect(url_for("main.home"))
+            return redirect(url_for("main.upload"))
         fingerprint = hashlib.sha256(data).hexdigest()
         with connection() as db:
             existing = db.execute(
@@ -274,6 +299,43 @@ def register_routes(app):
             job=latest_job(paper_id),
             categories=CATEGORIES,
         )
+
+    @app.get("/papers/<int:paper_id>/pdf")
+    def open_pdf(paper_id):
+        paper = paper_or_404(paper_id)
+        return send_file(paper_pdf_source(paper), mimetype="application/pdf",
+                         download_name=paper_pdf_filename(paper), max_age=0)
+
+    @app.get("/papers/<int:paper_id>/download.pdf")
+    def download_paper_pdf(paper_id):
+        paper = paper_or_404(paper_id)
+        return send_file(paper_pdf_source(paper), mimetype="application/pdf",
+                         as_attachment=True, download_name=paper_pdf_filename(paper), max_age=0)
+
+    @app.get("/papers/<int:paper_id>/text")
+    def view_paper(paper_id):
+        paper = paper_or_404(paper_id)
+        source = paper_pdf_source(paper)
+        pages, text_size = [], 0
+        try:
+            document = (fitz.open(source) if isinstance(source, Path)
+                        else fitz.open(stream=source.getvalue(), filetype="pdf"))
+            with document:
+                if document.needs_pass:
+                    abort(422, description="Password-protected PDFs cannot be displayed as text.")
+                if not document.is_pdf or not 1 <= len(document) <= current_app.config["MAX_PDF_PAGES"]:
+                    abort(422, description="Choose a PDF with 1 to 300 pages.")
+                for number, page in enumerate(document, 1):
+                    text = page.get_text("text", sort=True)
+                    text_size += len(text)
+                    if text_size > 3_000_000:
+                        abort(422, description="The PDF text exceeds the display limit.")
+                    pages.append({"number": number, "text": text})
+        except (OSError, ValueError, RuntimeError):
+            abort(422, description="This PDF could not be read as text.")
+        warnings = (["Little readable text was found. Scanned pages need OCR, which is not included."]
+                    if sum(len(page["text"].strip()) for page in pages) < 100 else [])
+        return render_template("paper_text.html", paper=paper, pages=pages, warnings=warnings)
 
     @app.route("/papers/<int:paper_id>/analyze", methods=["POST"])
     def analyze_paper(paper_id):
@@ -370,73 +432,3 @@ def register_routes(app):
             mimetype="text/csv",
             headers={"Content-Disposition": 'attachment; filename="paperlens-library.csv"'},
         )
-
-    @app.route("/analytics", methods=["GET"])
-    def analytics():
-        """Summarize saved reports and prepare the comparison charts."""
-        from collections import Counter, defaultdict
-        import plotly.graph_objects as go
-        from plotly.utils import PlotlyJSONEncoder
-
-        papers = list_papers()
-        analyzed = [paper for paper in papers if paper["report"]]
-        scored = [paper for paper in analyzed if paper["score"] is not None]
-        groups = {}
-        for field in ("area", "year"):
-            bucket = defaultdict(list)
-            for paper in scored:
-                if paper[field] is not None:
-                    bucket[str(paper[field])].append(paper["score"])
-            groups[field] = {
-                key: {"mean": round(sum(values) / len(values), 1), "count": len(values)}
-                for key, values in sorted(bucket.items())
-            }
-        status_counts = Counter()
-        for paper in analyzed:
-            status_counts.update(resource["status"] for resource in get_resources(paper["id"]))
-        charts = []
-        for field, title in (
-            ("area", "Link accessibility by research area"),
-            ("year", "Link accessibility by publication year"),
-        ):
-            group = groups[field]
-            fig = go.Figure(
-                go.Bar(
-                    x=list(group),
-                    y=[row["mean"] for row in group.values()],
-                    text=[f'n={row["count"]}' for row in group.values()],
-                    marker_color="#2563eb",
-                )
-            )
-            fig.update_layout(
-                title=title,
-                yaxis={"title": "Mean link accessibility score", "range": [0, 105]},
-                template="plotly_white",
-                margin={"l": 50, "r": 20, "t": 60, "b": 100},
-                height=360,
-                font={"family": "Arial"},
-            )
-            charts.append(json.loads(json.dumps(fig.to_plotly_json(), cls=PlotlyJSONEncoder)))
-        return render_template(
-            "analytics.html",
-            total=len(papers),
-            analyzed=len(analyzed),
-            average=(
-                round(sum(p["score"] for p in scored) / len(scored), 1) if scored else None
-            ),
-            charts=charts,
-            groups=groups,
-            statuses=status_counts,
-        )
-
-    @app.route("/assets/plotly.js", methods=["GET"])
-    def plotly_asset():
-        from plotly.offline import get_plotlyjs
-
-        return Response(
-            get_plotlyjs(),
-            mimetype="application/javascript",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
-
-   

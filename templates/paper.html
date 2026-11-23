@@ -26,28 +26,17 @@
                    target="_blank"
                    rel="noopener noreferrer">Original paper ↗</a>
             {% endif %}
-            {% if paper.pdf_url %}
+            {% if paper.pdf_url or paper.local_path %}
                 <a class="button secondary"
-                   href="{{ paper.pdf_url }}"
+                   href="{{ url_for('main.open_pdf', paper_id=paper.id) if paper.local_path else paper.pdf_url }}"
                    target="_blank"
                    rel="noopener noreferrer">Open PDF ↗</a>
-            {% endif %}
-            {% if paper.report %}
-                <a class="button secondary"
-                   href="{{ url_for('main.report_json', paper_id=paper.id) }}">
-                    Download report ↓
-                </a>
-                <button class="button secondary" type="button" data-print>Print / save PDF</button>
+                <a class="button secondary" href="{{ url_for('main.download_paper_pdf', paper_id=paper.id) }}">Download PDF ↓</a>
+                <a class="button secondary" href="{{ url_for('main.view_paper', paper_id=paper.id) }}" target="_blank" rel="noopener noreferrer">View paper ↗</a>
             {% endif %}
         </div>
-        {% if paper.abstract %}
-            <details class="abstract-block">
-                <summary>Read abstract</summary>
-                <p>{{ paper.abstract }}</p>
-            </details>
-        {% endif %}
     </section>
-    <section class="container section report-layout{% if paper.report %} report-ready{% endif %}">
+    <section class="container section">
         <div>
             {% if job and job.status in ["queued","running"] %}
                 <div class="notice progress-notice"
@@ -131,38 +120,14 @@
                         {% endif %}
                     </p>
                 </section>
-            {% else %}
-                <div class="panel intro-panel">
-                    <span class="eyebrow">READY TO INSPECT</span>
-                    <h2>Turn this paper into an evidence trail</h2>
-                    <p>
-                        Start analysis to extract PDF links, check their availability, and calculate an equal-link accessibility score.
-                    </p>
-                    <p class="meta">
-                        Checks contact external resource hosts. Full datasets and source repositories are not downloaded.
-                    </p>
-                </div>
             {% endif %}
         </div>
-        <aside class="panel analysis-controls">
-            <h2>
-                {% if paper.report %}
-                    Refresh analysis
-                {% else %}
-                    Analyze this paper
-                {% endif %}
-            </h2>
-            <p class="muted">Check every extracted link with equal weight, regardless of category.</p>
-            <form action="{{ url_for('main.analyze_paper', paper_id=paper.id) }}" method="post" data-busy>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="button primary" type="submit" {% if paper.analysis_status == 'analyzing' %}disabled{% endif %}>
-                    {% if paper.analysis_status == 'analyzing' %}Analysis running…
-                    {% elif paper.report %}Recheck resources ↻
-                    {% else %}Start analysis →{% endif %}
-                </button>
-            </form>
-            <p class="meta">Score = verified accessible links divided by extracted links. Categories are labels only. Checks measure availability, not successful reproduction of experiments.</p>
-        </aside>
+        <form action="{{ url_for('main.analyze_paper', paper_id=paper.id) }}" method="post" data-busy>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button primary" type="submit" {% if paper.analysis_status == 'analyzing' %}disabled{% endif %}>
+                {% if paper.analysis_status == 'analyzing' %}Analysis running…{% else %}Start analysis{% endif %}
+            </button>
+        </form>
     </section>
     {% if paper.report %}
         <section class="container section" id="resources">
@@ -184,9 +149,6 @@
                     </select>
                 </label>
             </div>
-            <p class="muted">
-                Review context to confirm a link belongs to this paper. Correcting a category changes its label only; every link keeps equal weight.
-            </p>
             <div class="resource-list">
                 {% for resource in resources %}
                     <article class="panel resource-card" data-category="{{ resource.category }}">
@@ -215,35 +177,6 @@
                         {% if resource.final_url and resource.final_url != resource.url %}
                             <p class="meta">Resolves to: {{ resource.final_url }}</p>
                         {% endif %}
-                        <details>
-                            <summary>View extraction evidence</summary>
-                            <blockquote>
-                                {{ resource.evidence }}
-                            </blockquote>
-                            <p class="meta">Checked {{ resource.checked_at or 'Not yet checked' }}</p>
-                        </details>
-                        <form class="category-form"
-                              action="{{ url_for('main.update_category', resource_id=resource.id) }}"
-                              method="post"
-                              data-busy>
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <label for="category-{{ resource.id }}">Category</label>
-                            <select id="category-{{ resource.id }}"
-                                    name="category"
-                                    {% if paper.analysis_status == 'analyzing' %}disabled{% endif %}>
-                                {% for category in categories %}
-                                    <option value="{{ category }}"
-                                            {% if resource.category == category %}selected{% endif %}>
-                                        {{ category|capitalize }}
-                                    </option>
-                                {% endfor %}
-                            </select>
-                            <button class="button small secondary"
-                                    type="submit"
-                                    {% if paper.analysis_status == 'analyzing' %}disabled{% endif %}>
-                                Save
-                            </button>
-                        </form>
                     </article>
                 {% else %}
                     <div class="empty-state">
@@ -257,14 +190,6 @@
             <p id="resource-filter-empty"
                class="notice"
                hidden>No resources match this category.</p>
-            <details class="panel limitations">
-                <summary>Analysis limitations</summary>
-                <ul>
-                    {% for limitation in paper.report.limitations %}
-                        <li>{{ limitation }}</li>
-                    {% endfor %}
-                </ul>
-            </details>
         </section>
     {% endif %}
 {% endblock %}

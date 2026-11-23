@@ -36,7 +36,7 @@ class MVPTests(unittest.TestCase):
         self.directory.cleanup()
 
     def token(self):
-        self.client.get('/')
+        self.client.get('/upload')
         with self.client.session_transaction() as session:
             return session['csrf_token']
 
@@ -74,12 +74,13 @@ class MVPTests(unittest.TestCase):
         self.fail('Analysis did not finish')
 
     def test_pages_assets_and_errors(self):
-        for path in ('/', '/health', '/search', '/library', '/analytics',
+        for path in ('/', '/health', '/search', '/upload', '/library',
                      '/papers/add', '/library/stats',
-                     '/static/css/style.css', '/static/js/app.js', '/assets/plotly.js'):
+                     '/static/css/style.css', '/static/js/app.js'):
             with self.subTest(path=path):
-                with self.client.get(path) as response:
+                with self.client.get(path, follow_redirects=True) as response:
                     self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get('/').headers['Location'], '/search')
         self.assertEqual(self.client.get('/not-found').status_code, 404)
         self.assertEqual(self.client.get('/library?year=oops').status_code, 400)
         self.assertEqual(self.client.post('/upload', data={}).status_code, 400)
@@ -94,7 +95,8 @@ class MVPTests(unittest.TestCase):
             with urlopen(base + '/health', timeout=5) as response:
                 self.assertIn(b'connected', response.read())
             with urlopen(base, timeout=5) as response:
-                self.assertIn(b'Inspect the resources', response.read())
+                self.assertIn(b'Find your next paper', response.read())
+                self.assertEqual(response.url, base + '/search')
         finally:
             server.shutdown()
             thread.join(timeout=5)
@@ -133,7 +135,6 @@ class MVPTests(unittest.TestCase):
         self.assertEqual(len(resources), 2)
         self.assertTrue(all(resource['page'] == 1 for resource in resources))
         self.assertEqual(self.client.get(location).status_code, 200)
-        self.assertEqual(self.client.get('/analytics').status_code, 200)
 
         code = next(r for r in resources if r['category'] == 'code')
         response = self.client.post(f"/resources/{code['id']}/category", data={
@@ -148,6 +149,70 @@ class MVPTests(unittest.TestCase):
         reopened = create_app(self.settings)
         with reopened.app_context():
             self.assertEqual(get_paper(paper_id)['score'], 50)
+
+    def test_uploaded_pdf_download_inline_and_full_text(self):
+        with pymupdf.open() as document:
+            document.new_page().insert_text((50, 50), 'First page: <script>alert(1)</script>')
+            document.new_page().insert_text((50, 50), 'Second page: complete extracted text.')
+            data = document.tobytes()
+        response = self.upload(data)
+        location = response.headers['Location']
+        detail = self.client.get(location)
+        self.assertIn(b'Download PDF', detail.data)
+        self.assertIn(b'View paper', detail.data)
+        self.assertNotIn(b'Download report', detail.data)
+        self.assertNotIn(b'Print / save PDF', detail.data)
+        with self.client.get(location + '/download.pdf') as downloaded:
+            self.assertEqual(downloaded.status_code, 200)
+            self.assertEqual(downloaded.mimetype, 'application/pdf')
+            self.assertTrue(downloaded.headers['Content-Disposition'].startswith('attachment;'))
+            self.assertEqual(downloaded.data, data)
+        with self.client.get(location + '/pdf') as inline:
+            self.assertEqual(inline.status_code, 200)
+            self.assertTrue(inline.headers['Content-Disposition'].startswith('inline;'))
+            self.assertEqual(inline.data, data)
+        view = self.client.get(location + '/text')
+        self.assertEqual(view.status_code, 200)
+        self.assertIn(b'Page 1', view.data)
+        self.assertIn(b'Page 2', view.data)
+        self.assertIn(b'Second page: complete extracted text.', view.data)
+        self.assertIn(b'&lt;script&gt;alert(1)&lt;/script&gt;', view.data)
+        self.assertNotIn(b'<script>alert(1)</script>', view.data)
+
+    def test_remote_pdf_download_and_text_failures(self):
+        with self.app.app_context():
+            paper_id = save_paper({'source': 'Manual', 'title': 'Remote download',
+                                  'pdf_url': 'https://example.org/paper.pdf'})
+        location = f'/papers/{paper_id}'
+        data = self.pdf()
+        with patch('app.routes.download_pdf', return_value=data):
+            with self.client.get(location + '/download.pdf') as response:
+                self.assertEqual(response.data, data)
+            self.assertIn(b'Implementation:', self.client.get(location + '/text').data)
+        with self.assertLogs(self.app.logger, level='WARNING'), patch(
+            'app.routes.download_pdf', side_effect=OSError('Unavailable')
+        ):
+            self.assertEqual(self.client.get(location + '/download.pdf').status_code, 502)
+            self.assertEqual(self.client.get(location + '/text').status_code, 502)
+
+    def test_pdf_actions_handle_missing_sources_scans_and_unsafe_paths(self):
+        with self.app.app_context():
+            missing_id = save_paper({'source': 'Manual', 'title': 'No PDF'})
+            outside = self.root / 'outside.pdf'
+            outside.write_bytes(self.pdf())
+            unsafe_id = save_paper({'source': 'Manual', 'title': 'Outside upload folder',
+                                   'local_path': str(outside)})
+        for paper_id in (missing_id, unsafe_id):
+            for suffix in ('/download.pdf', '/pdf', '/text'):
+                self.assertEqual(self.client.get(f'/papers/{paper_id}' + suffix).status_code, 404)
+        with pymupdf.open() as document:
+            document.new_page()
+            blank = document.tobytes()
+        response = self.upload(blank)
+        view = self.client.get(response.headers['Location'] + '/text')
+        self.assertEqual(view.status_code, 200)
+        self.assertIn(b'Scanned pages need OCR', view.data)
+        self.assertIn(b'No extractable text', view.data)
 
     def test_search_deduplicates_and_handles_provider_failure(self):
         paper = {'paper_id': '1234.5678', 'arxiv_id': '1234.5678',
@@ -305,7 +370,7 @@ class MVPTests(unittest.TestCase):
         self.assertEqual(calculate_score([links[0]])['score'], 100)
         self.assertEqual(calculate_score([links[2]])['score'], 0)
 
-    def test_no_links_is_not_scored_and_analytics_remain_valid(self):
+    def test_no_links_is_not_scored_and_pages_remain_valid(self):
         response = self.client.post('/papers/add', data={
             'csrf_token': self.token(), 'title': 'Paper without URLs',
         })
@@ -315,8 +380,8 @@ class MVPTests(unittest.TestCase):
         self.wait(paper_id)
         with self.app.app_context():
             self.assertIsNone(get_paper(paper_id)['score'])
-        for path in (location, '/library', '/', '/analytics'):
-            response = self.client.get(path)
+        for path in (location, '/library', '/'):
+            response = self.client.get(path, follow_redirects=True)
             self.assertEqual(response.status_code, 200)
         self.assertIn(b'Not scored', self.client.get(location).data)
         self.assertIsNone(self.client.get(location + '/report.json').json['paper']['score'])

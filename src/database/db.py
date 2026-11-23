@@ -216,7 +216,7 @@ def list_papers(filters=None):
             "SELECT * FROM papers"
             + where
             + " ORDER BY "
-            + order.get(filters.get("sort"), "id DESC"),
+            + order.get(filters.get("sort"), "score DESC, id DESC"),
             values,
         ).fetchall()
     return [decode(row) for row in rows]

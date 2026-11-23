@@ -194,13 +194,15 @@ def register_routes(app):
         )
         return redirect(url_for("main.detail", paper_id=paper_id))
 
-    @app.route("/upload", methods=["POST"])
+    @app.route("/upload", methods=["GET", "POST"])
     def upload():
-        """Validate an uploaded PDF, avoid duplicates, and save its metadata."""
+        if request.method == "GET":
+            return render_template("upload.html")
+
         file = request.files.get("pdf")
         if not file or not file.filename or Path(file.filename).suffix.lower() != ".pdf":
             flash("Choose a PDF file to upload.", "error")
-            return redirect(url_for("main.home"))
+            return redirect(url_for("main.upload"))
         year = request.form.get("year", "").strip()
         if year:
             try:
@@ -209,7 +211,7 @@ def register_routes(app):
                     raise ValueError
             except ValueError:
                 flash("Enter a valid four-digit publication year.", "error")
-                return redirect(url_for("main.home", _anchor="upload"))
+                return redirect(url_for("main.upload"))
         else:
             year = None
         data = file.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)
@@ -233,7 +235,7 @@ def register_routes(app):
                 )
         except (ValueError, RuntimeError, fitz.FileDataError) as exc:
             flash("Could not read this PDF: " + str(exc)[:250], "error")
-            return redirect(url_for("main.home"))
+            return redirect(url_for("main.upload"))
         fingerprint = hashlib.sha256(data).hexdigest()
         with connection() as db:
             existing = db.execute(
@@ -369,74 +371,6 @@ def register_routes(app):
             output.getvalue(),
             mimetype="text/csv",
             headers={"Content-Disposition": 'attachment; filename="paperlens-library.csv"'},
-        )
-
-    @app.route("/analytics", methods=["GET"])
-    def analytics():
-        """Summarize saved reports and prepare the comparison charts."""
-        from collections import Counter, defaultdict
-        import plotly.graph_objects as go
-        from plotly.utils import PlotlyJSONEncoder
-
-        papers = list_papers()
-        analyzed = [paper for paper in papers if paper["report"]]
-        scored = [paper for paper in analyzed if paper["score"] is not None]
-        groups = {}
-        for field in ("area", "year"):
-            bucket = defaultdict(list)
-            for paper in scored:
-                if paper[field] is not None:
-                    bucket[str(paper[field])].append(paper["score"])
-            groups[field] = {
-                key: {"mean": round(sum(values) / len(values), 1), "count": len(values)}
-                for key, values in sorted(bucket.items())
-            }
-        status_counts = Counter()
-        for paper in analyzed:
-            status_counts.update(resource["status"] for resource in get_resources(paper["id"]))
-        charts = []
-        for field, title in (
-            ("area", "Link accessibility by research area"),
-            ("year", "Link accessibility by publication year"),
-        ):
-            group = groups[field]
-            fig = go.Figure(
-                go.Bar(
-                    x=list(group),
-                    y=[row["mean"] for row in group.values()],
-                    text=[f'n={row["count"]}' for row in group.values()],
-                    marker_color="#2563eb",
-                )
-            )
-            fig.update_layout(
-                title=title,
-                yaxis={"title": "Mean link accessibility score", "range": [0, 105]},
-                template="plotly_white",
-                margin={"l": 50, "r": 20, "t": 60, "b": 100},
-                height=360,
-                font={"family": "Arial"},
-            )
-            charts.append(json.loads(json.dumps(fig.to_plotly_json(), cls=PlotlyJSONEncoder)))
-        return render_template(
-            "analytics.html",
-            total=len(papers),
-            analyzed=len(analyzed),
-            average=(
-                round(sum(p["score"] for p in scored) / len(scored), 1) if scored else None
-            ),
-            charts=charts,
-            groups=groups,
-            statuses=status_counts,
-        )
-
-    @app.route("/assets/plotly.js", methods=["GET"])
-    def plotly_asset():
-        from plotly.offline import get_plotlyjs
-
-        return Response(
-            get_plotlyjs(),
-            mimetype="application/javascript",
-            headers={"Cache-Control": "public, max-age=86400"},
         )
 
    

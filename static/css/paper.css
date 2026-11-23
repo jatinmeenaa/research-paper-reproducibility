@@ -364,3 +364,5 @@ blockquote {
         min-width: 420px;
     }
 }
+
+.paper-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }

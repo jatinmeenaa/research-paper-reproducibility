@@ -26,7 +26,7 @@ Stop with Ctrl+C. Restart the server after changing Python files.
 3. Start analysis. Progress updates automatically while a background job runs.
 4. Review the score, link statuses, page evidence, and coverage warnings.
 5. Correct inferred resource categories if needed; labels do not affect the score.
-6. Filter the library, inspect analytics, export CSV/JSON, or print a report.
+6. Filter the library, download the original PDF, or open View paper to read its extracted text.
 
 Search providers need an internet connection and can rate-limit requests. Manual
 entry and local PDF extraction work independently of search providers. Availability

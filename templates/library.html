@@ -16,17 +16,16 @@
                 <h1>Paper library</h1>
                 <p class="muted">Saved discoveries, uploaded papers, and resource accessibility reports.</p>
             </div>
-            <a class="button secondary"
-               href="{{ url_for('main.library_csv', **request.args.to_dict()) }}">
-                Export filtered CSV ↓
-            </a>
         </div>
     </section>
     <section class="container section library-layout">
-        <form class="panel filter-panel" method="get">
+        <form class="panel filter-panel" action="{{ url_for('main.library') }}" method="get">
             <div class="section-heading">
                 <h2>Filters</h2>
-                <a href="{{ url_for('main.library') }}">Reset</a>
+                <div class="filter-actions">
+                    <a href="{{ url_for('main.library') }}">Reset</a>
+                    <button class="button primary small" type="submit">Go</button>
+                </div>
             </div>
             <label for="filter-q">Title, author, or abstract</label>
             <input id="filter-q"
@@ -71,7 +70,6 @@
                             {% if filters.sort == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
-            <button class="button primary" type="submit">Apply filters</button>
         </form>
         <div>
             <p class="result-count">{{ papers|length }} paper{{ '' if papers|length == 1 else 's' }}</p>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ paper.title }} · Text view{% endblock %}
+{% block styles %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/paper.css') }}">
+{% endblock %}
+{% block content %}
+<section class="container page-head paper-head">
+    <a class="back-link" href="{{ url_for('main.detail', paper_id=paper.id) }}">← Back to paper</a>
+    <h1>{{ paper.title }}</h1>
+    <p class="meta">Extracted PDF text · {{ pages|length }} pages</p>
+    <div class="actions">
+        <a class="button secondary" href="{{ url_for('main.open_pdf', paper_id=paper.id) }}" target="_blank" rel="noopener noreferrer">Open PDF ↗</a>
+        <a class="button secondary" href="{{ url_for('main.download_paper_pdf', paper_id=paper.id) }}">Download PDF ↓</a>
+    </div>
+</section>
+<section class="container section">
+    {% for warning in warnings %}<p class="notice warning">{{ warning }}</p>{% endfor %}
+    {% for page in pages %}
+        <article class="panel">
+            <h2>Page {{ page.number }}</h2>
+            {% if page.text|trim %}<div class="paper-text">{{ page.text }}</div>
+            {% else %}<p class="meta">No extractable text on this page.</p>{% endif %}
+        </article>
+    {% endfor %}
+</section>
+{% endblock %}

@@ -24,8 +24,8 @@
         <header class="site-header">
             <nav class="nav-shell" aria-label="Main navigation">
                 <a class="brand"
-                   href="{{ url_for('main.home') }}"
-                   aria-label="PaperLens home">
+                   href="{{ url_for('main.search') }}"
+                   aria-label="PaperLens search">
                     <span class="brand-icon" aria-hidden="true">
                         P
                         <span>·</span>
@@ -37,13 +37,13 @@
                        {% if request.endpoint == 'main.search' %}aria-current="page"{% endif %}>
                         Discover
                     </a>
+                    <a href="{{ url_for('main.upload') }}"
+                       {% if request.endpoint == 'main.upload' %}aria-current="page"{% endif %}>
+                        Upload paper
+                    </a>
                     <a href="{{ url_for('main.library') }}"
                        {% if request.endpoint == 'main.library' %}aria-current="page"{% endif %}>
                         Library
-                    </a>
-                    <a href="{{ url_for('main.analytics') }}"
-                       {% if request.endpoint == 'main.analytics' %}aria-current="page"{% endif %}>
-                        Analytics
                     </a>
                 </div>
             </nav>
@@ -58,7 +58,7 @@
         </main>
         <footer class="site-footer">
             <div class="container footer-inner">
-                <a class="brand" href="{{ url_for('main.home') }}">PaperLens</a>
+                <a class="brand" href="{{ url_for('main.search') }}">PaperLens</a>
                 <p>
                     Research Paper Reproducibility Explorer
                     <br>

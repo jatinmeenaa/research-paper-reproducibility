@@ -47,9 +47,6 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener("pageshow", event => {
         if (event.persisted) window.location.reload();
     });
-    document.querySelectorAll("[data-print]").forEach(button => {
-        button.addEventListener("click", () => window.print());
-    });
     const stats = document.querySelector("[data-library-stats]");
     if (stats) {
         let updating = false;
@@ -133,18 +130,5 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             document.getElementById("resource-filter-empty").hidden = shown > 0;
         });
-    }
-    const chartData = document.getElementById("chart-data");
-    if (chartData && window.Plotly) {
-        try {
-            JSON.parse(chartData.textContent).forEach((figure, index) => {
-                window.Plotly.newPlot("chart-" + (index + 1), figure.data, figure
-                    .layout, {
-                        responsive: true,
-                        displayModeBar: false
-                    });
-            });
-        } catch (_) {
-            }
     }
 });

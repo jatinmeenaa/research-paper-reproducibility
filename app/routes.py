@@ -439,6 +439,4 @@ def register_routes(app):
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
-    @app.route("/methodology", methods=["GET"])
-    def methodology():
-        return render_template("methodology.html")
+   

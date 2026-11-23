@@ -75,7 +75,7 @@ class MVPTests(unittest.TestCase):
 
     def test_pages_assets_and_errors(self):
         for path in ('/', '/health', '/search', '/library', '/analytics',
-                     '/methodology', '/papers/add', '/library/stats',
+                     '/papers/add', '/library/stats',
                      '/static/css/style.css', '/static/js/app.js', '/assets/plotly.js'):
             with self.subTest(path=path):
                 with self.client.get(path) as response:

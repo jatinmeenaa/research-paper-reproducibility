@@ -33,6 +33,12 @@ entry and local PDF extraction work independently of search providers. Availabil
 checks still need network access. Remote PDF failures fall back to abstract links
 and produce a partial report.
 
+Successful searches are cached in SQLite for 10 minutes and survive application
+restarts. When a provider fails or rate-limits requests, search uses older exact-query
+results, related saved papers, or previously saved machine-learning papers in that
+order. Fallback notices identify older or different-topic results. Provider cooldowns
+avoid repeatedly calling a failing API; HTTP 429 Retry-After seconds are respected.
+
 An optional Semantic Scholar API key can be set before starting the server:
 
 ```powershell

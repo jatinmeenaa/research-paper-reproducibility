@@ -19,12 +19,12 @@
     </section>
     <section class="container section">
         {% for error in errors %}
-            <div class="notice error" role="alert">{{ error }}</div>
+            <div class="notice {{ 'warning' if papers else 'error' }}" role="status">{{ error }}</div>
         {% endfor %}
         {% if query %}
             <div class="section-heading">
-                <h2>{{ papers|length }} result{{ '' if papers|length == 1 else 's' }} for “{{ query }}”</h2>
-                <span class="meta">Up to 10 results per source · cached for 10 minutes</span>
+                <h2>{{ papers|length }} result{{ '' if papers|length == 1 else 's' }}{% if not errors %} for “{{ query }}”{% endif %}</h2>
+                <span class="meta">Up to 10 results per source · saved results available during provider outages</span>
             </div>
             {% if papers %}
                 <div class="paper-grid">

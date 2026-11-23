@@ -228,6 +228,88 @@ class MVPTests(unittest.TestCase):
             response = self.client.get('/search?q=example')
             self.assertIn(b'Provider unavailable', response.data)
 
+    def test_search_cache_survives_app_restart(self):
+        from src.paper.discovery import discover
+        paper = {'paper_id': 'cache-1', 'source': 'arXiv', 'title': 'Machine learning methods',
+                 'authors': ['Alice'], 'abstract': 'Methods for machine learning.'}
+        with patch('src.paper.discovery.search_arxiv', return_value=[paper]) as provider:
+            with self.app.app_context():
+                results, notices = discover('Machine Learning')
+            self.assertEqual(len(results), 1)
+            self.assertEqual(notices, [])
+            provider.assert_called_once()
+        reopened = create_app(self.settings)
+        with patch('src.paper.discovery.search_arxiv') as provider:
+            with reopened.app_context():
+                results, notices = discover(' machine   learning ')
+            provider.assert_not_called()
+        self.assertEqual(results[0]['title'], paper['title'])
+        self.assertEqual(notices, [])
+
+    def test_rate_limit_uses_stale_results_and_machine_learning_cooldown(self):
+        import requests
+        from src.paper.discovery import discover
+        from src.database.db import connection
+        paper = {'paper_id': 'cache-1', 'source': 'arXiv', 'title': 'Machine learning methods',
+                 'authors': ['Alice'], 'abstract': 'Methods for machine learning.'}
+        with patch('src.paper.discovery.search_arxiv', return_value=[paper]):
+            with self.app.app_context():
+                discover('machine learning')
+                with connection() as db:
+                    db.execute('UPDATE discovery_cache SET fetched_at=0')
+        response = requests.Response()
+        response.status_code = 429
+        response.headers['Retry-After'] = '120'
+        with patch('src.paper.discovery.search_arxiv', side_effect=requests.HTTPError(response=response)) as provider:
+            with self.app.app_context():
+                results, notices = discover('machine learning')
+                self.assertEqual(len(results), 1)
+                self.assertIn('previously saved results for this search', notices[0])
+                self.assertIn('rate-limited', notices[0])
+                results, notices = discover('a completely different topic')
+                self.assertEqual(len(results), 1)
+                self.assertIn('machine-learning papers as a fallback', notices[0])
+                self.assertIn('may not match your current query', notices[0])
+                with connection() as db:
+                    self.assertGreater(db.execute('SELECT retry_at FROM discovery_provider_state').fetchone()[0], time.time())
+            provider.assert_called_once()
+
+    def test_provider_failure_falls_back_to_existing_library(self):
+        import requests
+        with self.app.app_context():
+            save_paper({'source': 'arXiv', 'paper_id': 'library-1',
+                        'title': 'Saved machine learning paper', 'abstract': 'A saved study.'})
+        with patch('src.paper.discovery.search_arxiv', side_effect=requests.Timeout('Timed out')):
+            response = self.client.get('/search?q=unrelated+new+topic')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Saved machine learning paper', response.data)
+        self.assertIn(b'machine-learning papers as a fallback', response.data)
+        self.assertNotIn(b'Search couldn', response.data)
+        self.assertNotIn(b'for \xe2\x80\x9cunrelated new topic', response.data)
+
+    def test_provider_failure_prefers_related_library_results(self):
+        import requests
+        from src.paper.discovery import discover
+        with self.app.app_context():
+            save_paper({'source': 'arXiv', 'paper_id': 'related-1',
+                        'title': 'Neural networks for machine learning'})
+            with patch('src.paper.discovery.search_arxiv', side_effect=requests.Timeout()):
+                papers, notices = discover('neural networks')
+        self.assertEqual(len(papers), 1)
+        self.assertIn('related papers', notices[0])
+        self.assertNotIn('may not match', notices[0])
+
+    def test_provider_failure_without_saved_results_is_honest(self):
+        import requests
+        from src.paper.discovery import discover
+        with self.app.app_context():
+            with patch('src.paper.discovery.search_arxiv', side_effect=requests.Timeout()) as provider:
+                papers, notices = discover('machine learning')
+                self.assertEqual(papers, [])
+                self.assertIn('No previously saved', notices[0])
+                discover('another query')
+                provider.assert_called_once()
+
     def test_provider_response_parsing(self):
         from src.paper.arxiv_client import search_arxiv
         from src.paper.semantic_scholar_client import search_semantic_scholar
